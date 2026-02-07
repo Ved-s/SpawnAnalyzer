@@ -78,7 +78,9 @@ public class SpawnSimulationContext
 
         if ((populatedNodes[index]?.timelines.Count ?? 0) <= currentTimeline)
         {
-            var branchInfos = runData.Nodes[index].GetBranches(param);
+            NodeRollParams rollParams = new();
+
+            runData.Nodes[index].NodeHit(this, param, rollParams, out BranchInfo[] branchInfos);
             var branches = new NodeConnection[branchInfos.Length];
 
             for (int b = 0; b < branches.Length; b++)
@@ -93,7 +95,7 @@ public class SpawnSimulationContext
                 populatedNodes[index] = new();
             }
 
-            var newTimeline = new SimRandomNodeTimeline(branches, runData.LocalStateInfo.Clone(localState!));
+            var newTimeline = new SimRandomNodeTimeline(branches, rollParams, runData.LocalStateInfo.Clone(localState!));
 
             populatedNodes[index]!.timelines.Add(newTimeline);
         }
@@ -224,7 +226,7 @@ public struct SimulationResult
 
 public abstract class SimulationNode
 {
-    public abstract BranchInfo[] GetBranches(object param);
+    public abstract void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches);
 }
 
 public struct BranchInfo
@@ -304,11 +306,18 @@ public class SimRandomNode
 public class SimRandomNodeTimeline
 {
     public object localState;
+    public NodeRollParams rollParams;
     public NodeConnection[] branches;
 
-    public SimRandomNodeTimeline(NodeConnection[] branches, object localState)
+    public SimRandomNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState)
     {
         this.branches = branches;
+        this.rollParams = rollParams;
         this.localState = localState;
     }
+}
+
+public class NodeRollParams
+{
+    public bool dependsOnLuck;
 }
