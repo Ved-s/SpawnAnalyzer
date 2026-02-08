@@ -1,0 +1,521 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+using MonoMod.Cil;
+using MonoMod.Utils;
+
+public class StackAnalyzer
+{
+    private StackAnalyzer() { }
+
+    static OpCode[] TwoParamMathOpcodes = [
+        OpCodes.Add,
+        OpCodes.Add_Ovf,
+        OpCodes.Add_Ovf_Un,
+        OpCodes.Sub,
+        OpCodes.Sub_Ovf,
+        OpCodes.Sub_Ovf_Un,
+        OpCodes.Mul,
+        OpCodes.Mul_Ovf,
+        OpCodes.Mul_Ovf_Un,
+        OpCodes.Div,
+        OpCodes.Div_Un,
+        OpCodes.Rem,
+        OpCodes.Rem_Un,
+        OpCodes.And,
+        OpCodes.Or,
+        OpCodes.Xor,
+    ];
+
+    public static StackAnalysis Analyze(ILContext il)
+    {
+        List<bool> processedInstructions = new();
+        List<bool> populatedInstructionInputs = new();
+        List<InstructionStackInfo> infos = new();
+        processedInstructions.Capacity = il.Instrs.Count;
+        populatedInstructionInputs.Capacity = il.Instrs.Count;
+        infos.Capacity = il.Instrs.Count;
+        foreach (Instruction instr in il.Instrs)
+        {
+            processedInstructions.Add(false);
+            populatedInstructionInputs.Add(false);
+            infos.Add(new(instr));
+        }
+
+        Stack<int> indexesToProcess = new();
+
+        for (int i = 0; i <= il.Instrs.Count; i++)
+        {
+            if (i >= il.Instrs.Count || processedInstructions[i])
+            {
+                if (indexesToProcess.Count == 0)
+                {
+                    break;
+                }
+                i = indexesToProcess.Pop() - 1;
+                continue;
+            }
+            InstructionStackInfo info = infos[i];
+            processedInstructions[i] = true;
+            populatedInstructionInputs[i] = true;
+
+            if (info.outValues.Count > 0)
+                throw new InvalidProgramException("InstructionStackInfo.outValues populated before instruction was analyzed");
+
+            info.outValues.AddRange(info.inValues);
+
+            Instruction instr = info.instruction;
+            OpCode opCode = instr.OpCode;
+            switch (opCode.StackBehaviourPop)
+            {
+                case StackBehaviour.Pop0:
+                    break;
+
+                case StackBehaviour.Popi:
+                case StackBehaviour.Pop1:
+                    if (info.outValues.Count == 0)
+                        throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    break;
+
+                case StackBehaviour.Pop1_pop1:
+                    if (info.outValues.Count < 2)
+                        throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    break;
+
+                case StackBehaviour.Popref_popi_popi:
+                    if (info.outValues.Count < 3)
+                        throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                    break;
+
+                case StackBehaviour.Varpop:
+                    if (instr.MatchCallOrCallvirt(out MethodReference? method))
+                    {
+                        if (method.HasThis)
+                        {
+                            if (info.outValues.Count == 0)
+                                throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                            info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                            info.outValues.RemoveAt(info.outValues.Count - 1);
+                        }
+                        for (int j = 0; j < method.Parameters.Count; j++)
+                        {
+                            if (info.outValues.Count == 0)
+                                throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                            info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                            info.outValues.RemoveAt(info.outValues.Count - 1);
+                        }
+                        break;
+                    }
+                    else if (instr.MatchRet())
+                    {
+                        if (info.outValues.Count >= 1)
+                        {
+                            info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                            info.outValues.RemoveAt(info.outValues.Count - 1);
+                        }
+                        break;
+                    }
+                    Console.WriteLine($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
+                    Environment.Exit(-1);
+                    break;
+
+                default:
+                    Console.WriteLine($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
+                    Environment.Exit(-1);
+                    break;
+            }
+
+            switch (opCode.StackBehaviourPush)
+            {
+                case StackBehaviour.Push0:
+                    break;
+
+                case StackBehaviour.Push1:
+                case StackBehaviour.Pushi:
+                case StackBehaviour.Pushi8:
+                case StackBehaviour.Pushr4:
+                case StackBehaviour.Pushr8:
+                case StackBehaviour.Pushref:
+                    StackValue value;
+
+                    if (instr.MatchLdsfld(out FieldReference? field))
+                    {
+                        FieldInfo fieldInfo = field.ResolveReflection();
+                        value = new(new StackValueOrigin.StaticField(fieldInfo), fieldInfo.FieldType, SimpleTypeFromSystemType(fieldInfo.FieldType));
+                    }
+                    else if (instr.MatchLdarg(out int arg))
+                    {
+                        ParameterDefinition? param = null;
+                        if (instr.Operand is ParameterDefinition p)
+                        {
+                            param = p;
+                        }
+                        else if (arg >= 0 && il.Method.Parameters.Count > arg)
+                        {
+                            param = il.Method.Parameters[arg];
+                        }
+                        Type? type = param?.ParameterType.ResolveReflection();
+
+                        value = new(
+                            new StackValueOrigin.Parameter(arg),
+                            type,
+                            type is null ? SimpleType.Object : SimpleTypeFromSystemType(type)
+                        );
+                    }
+                    else if (TwoParamMathOpcodes.Contains(opCode))
+                    {
+                        StackValue inputVal1 = info.inValues[info.inValues.Count - 1];
+                        StackValue inputVal2 = info.inValues[info.inValues.Count - 2];
+
+                        Type? type = inputVal1.type;
+                        SimpleType simpleType = inputVal1.simpleType;
+
+                        if (type is null && inputVal2.type is not null)
+                        {
+                            type = inputVal2.type;
+                            simpleType = inputVal2.simpleType;
+                        }
+
+                        value = new(
+                            null,
+                            type,
+                            simpleType
+                        );
+                    }
+                    else if (instr.MatchLdcI4(out int intValue))
+                    {
+                        value = new(new StackValueOrigin.ConstInt(intValue), typeof(int), SimpleType.Integer);
+                    }
+                    else if (instr.MatchLdcI8(out long longValue))
+                    {
+                        value = new(new StackValueOrigin.ConstLong(longValue), typeof(int), SimpleType.Integer);
+                    }
+                    else if (instr.MatchLdcR4(out float floatValue))
+                    {
+                        value = new(new StackValueOrigin.ConstFloat(floatValue), typeof(int), SimpleType.Integer);
+                    }
+                    else if (instr.MatchLdcR8(out double doubleValue))
+                    {
+                        value = new(new StackValueOrigin.ConstDouble(doubleValue), typeof(int), SimpleType.Integer);
+                    }
+                    else if (instr.MatchNewarr(out TypeReference? arrayType))
+                    {
+                        Type type = arrayType.ResolveReflection().MakeArrayType();
+                        value = new(null, type, SimpleType.Object);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
+                        Environment.Exit(-1);
+                        break;
+                    }
+
+                    value.producedBy.Add(instr);
+
+                    info.outValues.Add(value);
+
+                    break;
+
+                case StackBehaviour.Varpush:
+                    if (instr.MatchCallOrCallvirt(out MethodReference? method))
+                    {
+                        if (!method.ReturnType.Is(typeof(void)))
+                        {
+                            MethodBase methodInfo = method.ResolveReflection();
+
+                            Type? returnType = (methodInfo as MethodInfo)?.ReturnType;
+
+                            value = new(
+                                new StackValueOrigin.MethodCall(methodInfo),
+                                returnType,
+                                returnType is null ? SimpleType.Object : SimpleTypeFromSystemType(returnType)
+                            );
+
+                            value.producedBy.Add(instr);
+                            info.outValues.Add(value);
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
+                        Environment.Exit(-1);
+                        break;
+                    }
+                    break;
+
+                case StackBehaviour.Push1_push1:
+
+                    StackValue value1;
+                    StackValue value2;
+
+                    if (instr.MatchDup())
+                    {
+                        StackValue inputVal = info.inValues[info.inValues.Count - 1];
+
+                        value1 = new(
+                            null,
+                            inputVal.type,
+                            inputVal.simpleType
+                        );
+                        value2 = new(
+                            null,
+                            inputVal.type,
+                            inputVal.simpleType
+                        );
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
+                        Environment.Exit(-1);
+                        break;
+                    }
+
+                    value1.producedBy.Add(instr);
+                    value2.producedBy.Add(instr);
+                    info.outValues.Add(value1);
+                    info.outValues.Add(value2);
+                    break;
+
+                default:
+                    Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
+                    Environment.Exit(-1);
+                    break;
+            }
+
+            if (opCode.FlowControl == FlowControl.Return)
+            {
+                if (indexesToProcess.Count == 0)
+                {
+                    break;
+                }
+                i = indexesToProcess.Pop() - 1;
+                continue;
+            }
+
+            switch (opCode.FlowControl)
+            {
+                case FlowControl.Call:
+                case FlowControl.Next:
+                    if (populatedInstructionInputs[i + 1])
+                    {
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos);
+                    }
+                    else
+                    {
+                        if (infos[i + 1].inValues.Count > 0)
+                            throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
+
+                        infos[i + 1].inValues.AddRange(info.outValues);
+                        populatedInstructionInputs[i + 1] = true;
+                    }
+                    break;
+
+                case FlowControl.Cond_Branch:
+
+                    if (populatedInstructionInputs[i + 1])
+                    {
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos);
+                    }
+                    else
+                    {
+                        if (infos[i + 1].inValues.Count > 0)
+                            throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
+
+                        infos[i + 1].inValues.AddRange(info.outValues);
+                        populatedInstructionInputs[i + 1] = true;
+                    }
+
+                    Instruction? nextInstr = null;
+
+                    if (instr.Operand is Instruction ins)
+                        nextInstr = ins;
+
+                    else if (instr.Operand is ILLabel label)
+                        nextInstr = label.Target;
+
+                    if (nextInstr is not null)
+                    {
+                        int index = -1;
+                        for (int i1 = 0; i1 < infos.Count; i1++)
+                        {
+                            if (infos[i1].instruction == nextInstr)
+                            {
+                                index = i1;
+                                break;
+                            }
+                        }
+
+                        if (index < 0)
+                            throw new InvalidProgramException($"Instruction {i} at IL_{instr.Offset:x4} points to invalid label");
+
+                        if (populatedInstructionInputs[index])
+                        {
+                            MergeStackValues(infos[index].inValues, info.outValues, infos);
+                        }
+                        else
+                        {
+                            if (infos[index].inValues.Count > 0)
+                                throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
+
+                            infos[index].inValues.AddRange(info.outValues);
+                            populatedInstructionInputs[index] = true;
+                        }
+
+                        if (!processedInstructions[index])
+                        {
+                            indexesToProcess.Push(index);
+                        }
+
+                        break;
+                    }
+
+                    Console.WriteLine($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
+                    Environment.Exit(-1);
+                    break;
+
+                default:
+                    Console.WriteLine($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
+                    Environment.Exit(-1);
+                    break;
+            }
+        }
+
+        return new(infos);
+    }
+
+    static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos)
+    {
+        throw new NotImplementedException();
+    }
+
+    static SimpleType SimpleTypeFromSystemType(Type type)
+    {
+        if (type.IsByRef)
+        {
+            return SimpleType.Reference;
+        }
+        else if (type == typeof(float))
+        {
+            return SimpleType.Float;
+        }
+        else if (type == typeof(double))
+        {
+            return SimpleType.Double;
+        }
+        else if (type.IsPrimitive)
+        {
+            if (type.GetManagedSize() < 8)
+                return SimpleType.Integer;
+            else if (type == typeof(long))
+                return SimpleType.Long;
+            else
+                throw new Exception($"What's that pokemon? It's {type.FullName}");
+        }
+        else
+        {
+            return SimpleType.Object;
+        }
+    }
+}
+
+public class StackAnalysis
+{
+    public List<InstructionStackInfo> instructions;
+
+    public StackAnalysis(List<InstructionStackInfo> instructions)
+    {
+        this.instructions = instructions;
+    }
+
+    public InstructionStackInfo? LookupInstruction(Instruction instr, out int index)
+    {
+        index = -1;
+
+        for (int i = 0; i < instructions.Count; i++)
+        {
+            if (instructions[i].instruction == instr)
+            {
+                index = i;
+                return instructions[i];
+            }
+        }
+
+        return null;
+    }
+}
+
+public class InstructionStackInfo
+{
+    public readonly Instruction instruction;
+
+    public List<StackValue> inValues = new();
+
+    public List<StackValue> outValues = new();
+
+    public InstructionStackInfo(Instruction instruction)
+    {
+        this.instruction = instruction;
+    }
+}
+
+public enum SimpleType
+{
+    Integer,
+    Long,
+    Float,
+    Double,
+    Reference,
+    Object,
+}
+
+public class StackValue
+{
+    public List<Instruction> producedBy = new();
+    public List<Instruction> consumedBy = new();
+
+    public SimpleType simpleType;
+    public Type? type;
+    public StackValueOrigin? origin;
+
+    public StackValue(StackValueOrigin? origin, Type? type, SimpleType simpleType)
+    {
+        this.origin = origin;
+        this.type = type;
+        this.simpleType = simpleType;
+    }
+}
+
+public record StackValueOrigin
+{
+    private StackValueOrigin() { }
+
+    public record StaticField(FieldInfo Field) : StackValueOrigin;
+    public record InstanceField(FieldInfo Field) : StackValueOrigin;
+    public record MethodCall(MethodBase Method) : StackValueOrigin;
+    public record Parameter(int Param) : StackValueOrigin;
+    public record ConstInt(int Value) : StackValueOrigin;
+    public record ConstLong(long Value) : StackValueOrigin;
+    public record ConstFloat(float Value) : StackValueOrigin;
+    public record ConstDouble(double Value) : StackValueOrigin;
+}

@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
+using Terraria.GameContent.ItemDropRules;
 
 namespace SpawnAnalyzer;
 
@@ -19,7 +21,7 @@ static class MonoModExtenstions
         }
     }
 
-    public static void FancyPrintout(this ILContext il)
+    public static void FancyPrintout(this ILContext il, List<InstructionStackInfo>? stack = null)
     {
         Console.Write(DnSpyAnsiColors.ildirective);
         Console.Write(".locals ");
@@ -59,6 +61,14 @@ static class MonoModExtenstions
         }
 
         int maxIndexWidth = (int)Math.Log10(il.Instrs.Count) + 1;
+        int maxstackdepth = 0;
+        if (stack is not null)
+        {
+            foreach (var info in stack)
+            {
+                maxstackdepth = Math.Max(info.inValues.Count, Math.Max(maxstackdepth, info.outValues.Count));
+            }
+        }
 
         for (int i = 0; i < il.Instrs.Count; i++)
         {
@@ -68,6 +78,59 @@ static class MonoModExtenstions
             int indexWidth = (i == 0) ? 1 : (int)Math.Log10(i) + 1;
             for (int j = 0; j < (maxIndexWidth - indexWidth); j++)
                 Console.Write(" ");
+
+            if (stack is not null && stack[i].instruction == il.Instrs[i])
+            {
+                Console.Write(" ");
+
+                var info = stack[i];
+                int inv = info.inValues.Count;
+                int outv = info.outValues.Count;
+
+                int commonvalues = 0;
+
+                for (int j = 0; j < Math.Min(inv, outv); j++)
+                {
+                    if (info.inValues[j] == info.outValues[j])
+                    {
+                        commonvalues++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                for (int j = 0; j < Math.Min(inv, outv); j++)
+                {
+                    if (j >= commonvalues)
+                        Console.Write(">");
+                    else
+                        Console.Write("|");
+                }
+
+                if (inv < outv)
+                {
+                    for (int j = 0; j < (outv-inv); j++)
+                    {
+                        Console.Write("/");
+                    }
+                }
+                else
+                {
+                    for (int j = 0; j < (inv-outv); j++)
+                    {
+                        Console.Write("\\");
+                    }
+                }
+
+                for (int j = Math.Max(info.inValues.Count, info.outValues.Count); j < maxstackdepth; j++)
+                {
+                    Console.Write("-");
+                }
+            }
+
+            
             Console.Write(" */ ");
             AssemblyPrint.Print(il.Instrs[i]);
             Console.WriteLine();

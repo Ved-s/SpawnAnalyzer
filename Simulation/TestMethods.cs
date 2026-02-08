@@ -196,6 +196,16 @@ public static class TestMethods
 
     public static void TestMethod7(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
     {
+        if (Main.rand.Next(3) == 0)
+        {
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, (int)Utils.SelectRandom<int>(Main.rand, new int[] { 299, 538 }), 0, 0f, 0f, 0f, 0f, 255);
+            return;
+        }
+        spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 46, 0, 0f, 0f, 0f, 0f, 255);
+    }
+
+    public static void TestMethod8(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
         if (spawner.RollLuck(2) == 0)
         {
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 624, 0, 0f, 0f, 0f, 0f, 255).timeLeft *= 10;

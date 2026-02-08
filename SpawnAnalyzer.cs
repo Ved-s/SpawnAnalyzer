@@ -45,157 +45,152 @@ public class SpawnAnalyzer
         MainSetupDrawInterfaceLayersHook = new Hook(typeof(Main).GetMethod("SetupDrawInterfaceLayers", (BindingFlags)(-1)), On_Main_SetupDrawInterfaceLayers);
 
         Stopwatch sw = Stopwatch.StartNew();
-        var d = SpawnAnNPCRewriter.RewriteMethod(null);//TestMethods.GetTestMethodInfo(6));
+        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(7));
         sw.Stop();
         Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
 
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
 
-        foreach (float luck in new float[] { -0.5f, 0.0f, 0.5f, 1.0f })
+        var ctx = new SpawnSimulationContext(d, spawner, 100, 200, 0, false);
+
+        sw.Restart();
+        var data = ctx.Simulate() ?? throw new NullReferenceException();
+        sw.Stop();
+
+        Console.WriteLine($"Simulated in {sw.ElapsedMilliseconds}ms, entry node {data.startNode}, visited {data.nodes.Count(n => n is not null)}/{d.Nodes.Length} nodes");
+
+        /*
+        for (int i = 0; i < data.nodes.Count; i++)
         {
-            spawner.luck = luck;
-
-            var ctx = new SpawnSimulationContext(d, spawner, 100, 200, 0, false);
-
-            sw.Restart();
-            var data = ctx.Simulate() ?? throw new NullReferenceException();
-            sw.Stop();
-
-            Console.WriteLine($"Simulated in {sw.ElapsedMilliseconds}ms, entry node {data.startNode}, visited {data.nodes.Count(n => n is not null)}/{d.Nodes.Length} nodes");
-
-            /*
-            for (int i = 0; i < data.nodes.Count; i++)
+            var node = data.nodes[i];
+            if (node is null)
             {
-                var node = data.nodes[i];
-                if (node is null)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (data.startNode == i)
-                {
-                    Console.WriteLine($"Node {i} (start): ");
-                }
-                else
-                {
-                    Console.WriteLine($"Node {i}: ");
-                }
+            if (data.startNode == i)
+            {
+                Console.WriteLine($"Node {i} (start): ");
+            }
+            else
+            {
+                Console.WriteLine($"Node {i}: ");
+            }
 
-                for (int t = 0; t < node.timelines.Count; t++)
-                {
+            for (int t = 0; t < node.timelines.Count; t++)
+            {
 
-                    Console.WriteLine($"  Timeline {t}:");
-                    var timeline = node.timelines[t];
-                    foreach (var branch in timeline.branches)
+                Console.WriteLine($"  Timeline {t}:");
+                var timeline = node.timelines[t];
+                foreach (var branch in timeline.branches)
+                {
+                    Console.Write($"   [{branch.info.chance * 100:.0}%] -> ");
+
+                    switch (branch.ConnectionType)
                     {
-                        Console.Write($"   [{branch.info.chance * 100:.0}%] -> ");
+                        case NodeConnectionType.NotExplored:
+                            Console.WriteLine($"Unexplored");
+                            break;
 
-                        switch (branch.ConnectionType)
-                        {
-                            case NodeConnectionType.NotExplored:
-                                Console.WriteLine($"Unexplored");
-                                break;
+                        case NodeConnectionType.NoConnection:
+                            Console.WriteLine($"Nothing");
+                            break;
 
-                            case NodeConnectionType.NoConnection:
-                                Console.WriteLine($"Nothing");
-                                break;
+                        case NodeConnectionType.RandomNode:
+                            Console.WriteLine($"Node {branch.nextRandom!.node}/{branch.nextRandom!.timeline}");
+                            break;
 
-                            case NodeConnectionType.RandomNode:
-                                Console.WriteLine($"Node {branch.nextRandom!.node}/{branch.nextRandom!.timeline}");
-                                break;
-
-                            case NodeConnectionType.SpawnNode:
-                                var spawn = branch.nextSpawn!;
-                                Console.WriteLine($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
-                                break;
-                        }
+                        case NodeConnectionType.SpawnNode:
+                            var spawn = branch.nextSpawn!;
+                            Console.WriteLine($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
+                            break;
                     }
                 }
             }
-            */
-            Dictionary<int, (NodeRollParams, float)> spawns = new();
-
-            // (node, timeline, branch, chance)
-            Stack<(int, int, int, float)> exploreStack = new();
-
-            var startTimeline = data.nodes[data.startNode]!.timelines[0];
-
-            for (int i = 0; i < startTimeline.branches.Length; i++)
-            {
-                exploreStack.Push((data.startNode, 0, i, startTimeline.branches[i].info.chance));
-            }
-
-            void MergeParams(NodeRollParams into, NodeRollParams p)
-            {
-                into.dependsOnLuck |= p.dependsOnLuck;
-            }
-
-            while (exploreStack.Count > 0)
-            {
-                var (node, timeline, branch, percent) = exploreStack.Pop();
-
-                var timelinev = data.nodes[node]!.timelines[timeline];
-                var branchv = timelinev.branches[branch];
-
-                switch (branchv.ConnectionType)
-                {
-                    case NodeConnectionType.RandomNode:
-                        var next = branchv.nextRandom!;
-                        var nextTimeline = data.nodes[next.node]!.timelines[next.timeline];
-                        for (int i = 0; i < nextTimeline.branches.Length; i++)
-                        {
-                            exploreStack.Push((next.node, next.timeline, i, nextTimeline.branches[i].info.chance * percent));
-                        }
-                        break;
-
-                    case NodeConnectionType.SpawnNode:
-                        if (!spawns.TryGetValue(branchv.nextSpawn!.npcId, out (NodeRollParams, float) oldvalue))
-                        {
-                            oldvalue = (new(), 0);
-                        }
-
-                        MergeParams(oldvalue.Item1, timelinev.rollParams);
-
-                        spawns[branchv.nextSpawn!.npcId] = (oldvalue.Item1, percent + oldvalue.Item2);
-                        break;
-
-                    case NodeConnectionType.NoConnection:
-                        if (!spawns.TryGetValue(-1, out oldvalue))
-                        {
-                            oldvalue = (new(), 0);
-                        }
-
-                        spawns[-1] = (oldvalue.Item1, percent + oldvalue.Item2);
-                        break;
-                }
-            }
-
-            Console.WriteLine($"Luck: {spawner.luck:0.00}");
-
-            Console.WriteLine("Calculated spawns:");
-            float chancesAdd = 0;
-            foreach (KeyValuePair<int, (NodeRollParams, float)> kvp in spawns)
-            {
-                chancesAdd += kvp.Value.Item2;
-                if (kvp.Key < 0)
-                    Console.WriteLine($" Nothing: {kvp.Value.Item2 * 100:.000}%");
-                else
-                {
-                    Console.Write($" {NPCID.Search.GetName(kvp.Key)} [{kvp.Key}]: {kvp.Value.Item2 * 100:.000}%");
-
-                    NodeRollParams rp = kvp.Value.Item1;
-
-                    if (rp.dependsOnLuck)
-                    {
-                        Console.Write(" [luck]");
-                    }
-
-                    Console.WriteLine();
-                }
-            }
-
-            Console.WriteLine($"Chances add up to {chancesAdd * 100:0.000}%\n");
         }
+        */
+        Dictionary<int, (NodeRollParams, float)> spawns = new();
+
+        // (node, timeline, branch, chance)
+        Stack<(int, int, int, float)> exploreStack = new();
+
+        var startTimeline = data.nodes[data.startNode]!.timelines[0];
+
+        for (int i = 0; i < startTimeline.branches.Length; i++)
+        {
+            exploreStack.Push((data.startNode, 0, i, startTimeline.branches[i].info.chance));
+        }
+
+        void MergeParams(NodeRollParams into, NodeRollParams p)
+        {
+            into.dependsOnLuck |= p.dependsOnLuck;
+        }
+
+        while (exploreStack.Count > 0)
+        {
+            var (node, timeline, branch, percent) = exploreStack.Pop();
+
+            var timelinev = data.nodes[node]!.timelines[timeline];
+            var branchv = timelinev.branches[branch];
+
+            switch (branchv.ConnectionType)
+            {
+                case NodeConnectionType.RandomNode:
+                    var next = branchv.nextRandom!;
+                    var nextTimeline = data.nodes[next.node]!.timelines[next.timeline];
+                    for (int i = 0; i < nextTimeline.branches.Length; i++)
+                    {
+                        exploreStack.Push((next.node, next.timeline, i, nextTimeline.branches[i].info.chance * percent));
+                    }
+                    break;
+
+                case NodeConnectionType.SpawnNode:
+                    if (!spawns.TryGetValue(branchv.nextSpawn!.npcId, out (NodeRollParams, float) oldvalue))
+                    {
+                        oldvalue = (new(), 0);
+                    }
+
+                    MergeParams(oldvalue.Item1, timelinev.rollParams);
+
+                    spawns[branchv.nextSpawn!.npcId] = (oldvalue.Item1, percent + oldvalue.Item2);
+                    break;
+
+                case NodeConnectionType.NoConnection:
+                    if (!spawns.TryGetValue(-1, out oldvalue))
+                    {
+                        oldvalue = (new(), 0);
+                    }
+
+                    spawns[-1] = (oldvalue.Item1, percent + oldvalue.Item2);
+                    break;
+            }
+        }
+
+        Console.WriteLine($"Luck: {spawner.luck:0.00}");
+
+        Console.WriteLine("Calculated spawns:");
+        float chancesAdd = 0;
+        foreach (KeyValuePair<int, (NodeRollParams, float)> kvp in spawns)
+        {
+            chancesAdd += kvp.Value.Item2;
+            if (kvp.Key < 0)
+                Console.WriteLine($" Nothing: {kvp.Value.Item2 * 100:.000}%");
+            else
+            {
+                Console.Write($" {NPCID.Search.GetName(kvp.Key)} [{kvp.Key}]: {kvp.Value.Item2 * 100:.000}%");
+
+                NodeRollParams rp = kvp.Value.Item1;
+
+                if (rp.dependsOnLuck)
+                {
+                    Console.Write(" [luck]");
+                }
+
+                Console.WriteLine();
+            }
+        }
+
+        Console.WriteLine($"Chances add up to {chancesAdd * 100:0.000}%\n");
 
         Environment.Exit(1);
     }

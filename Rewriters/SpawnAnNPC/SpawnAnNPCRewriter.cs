@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -41,8 +42,6 @@ public class SpawnAnNPCRewriter
 
         ILContext il = new(dmd.Definition);
 
-        il.FancyPrintout();
-
         LocalStateInfo ls = null!;
 
         il.Invoke((il) => ls = RewriteMethodInternal(il, nodes));
@@ -68,6 +67,10 @@ public class SpawnAnNPCRewriter
 
         VariableDefinition stopVar = new(il.Import(typeof(bool)));
         VariableDefinition randomParamVar = new(il.Import(typeof(object)));
+
+        StackAnalysis stack = StackAnalyzer.Analyze(il);
+
+        il.FancyPrintout(stack.instructions);
 
         ILCursor c = new(il);
 
