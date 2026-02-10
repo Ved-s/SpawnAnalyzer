@@ -15,6 +15,8 @@ namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
 
 public class LocalStateInfo
 {
+    static int GeneratedCount = 0;
+
     public Type Type;
 
     public new Func<object, object, bool> Equals;
@@ -29,7 +31,8 @@ public class LocalStateInfo
 
     public static LocalStateInfo RewriteLocalState(ILContext il, ParameterDefinition contextParam)
     {
-        TypeBuilder typeBuilder = SpawnAnNPCRewriter.TypeModule.DefineType($"LocalState<{il.Method.FullName}>");
+        TypeBuilder typeBuilder = SpawnAnNPCRewriter.TypeModule.DefineType($"MethodLocalStateStore_{GeneratedCount}");
+        GeneratedCount++;
 
         foreach (VariableDefinition var in il.Body.Variables)
         {

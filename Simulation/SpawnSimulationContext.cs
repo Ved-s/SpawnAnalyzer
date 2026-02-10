@@ -142,11 +142,6 @@ public class SpawnSimulationContext
         currentConnection = null;
     }
 
-    internal static void ExitNodeHitReorderedArgs(int x, int y, int type, SpawnSimulationContext ctx)
-    {
-        ctx.ExitNodeHit(x, y, type);
-    }
-
     public SimulationResult? Simulate()
     {
         foundInitialNode = null;

@@ -129,12 +129,12 @@ static class MonoModExtenstions
                     Console.Write("-");
                 }
             }
-
             
             Console.Write(" */ ");
             AssemblyPrint.Print(il.Instrs[i]);
             Console.WriteLine();
-            if (il.Instrs[i].Operand is ILLabel or Instruction or ILLabel[] or Instruction[])
+            FlowControl flowControl = il.Instrs[i].OpCode.FlowControl;
+            if (flowControl != FlowControl.Next && flowControl != FlowControl.Call)
             {
                 Console.WriteLine();
             }

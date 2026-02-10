@@ -19,7 +19,6 @@ using Terraria.UI;
 namespace SpawnAnalyzer;
 
 // TODO: build method block tree to determine when locals end
-// TODO: stack analyzer
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
 public class SpawnAnalyzer
 {
@@ -45,7 +44,7 @@ public class SpawnAnalyzer
         MainSetupDrawInterfaceLayersHook = new Hook(typeof(Main).GetMethod("SetupDrawInterfaceLayers", (BindingFlags)(-1)), On_Main_SetupDrawInterfaceLayers);
 
         Stopwatch sw = Stopwatch.StartNew();
-        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(7));
+        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(6));
         sw.Stop();
         Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
 

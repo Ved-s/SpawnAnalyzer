@@ -8,6 +8,7 @@ using MonoMod.Cil;
 using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
 using Terraria;
+using Terraria.GameContent;
 using Terraria.Utilities;
 
 namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
@@ -212,7 +213,7 @@ class RandomCallRewriter
     }
     */
 
-    public void RewriteRandomCalls(ILCursor c)
+    public void RewriteRandomCalls(ILCursor c, StackAnalysis stack)
     {
         ulong unknownPatterns = 0;
         ulong knownPatterns = 0;
@@ -225,6 +226,38 @@ class RandomCallRewriter
         {
             Instruction instr = c.Next!;
             MethodReference method = (instr.Operand as MethodReference)!;
+
+            InstructionStackInfo stackInfo = stack.LookupInstruction(instr, out _) 
+                ?? throw new InvalidOperationException("Stack analysis out of date or invalid");
+
+            Instruction? thisLoadInstr = null;
+
+            bool treatFirstArgAsThis = method.Name == "SelectRandom";
+
+            if (method.HasThis || treatFirstArgAsThis)
+            {
+                int restParams = method.Parameters.Count;
+                if (treatFirstArgAsThis)
+                {
+                    restParams--;
+                }
+                StackValue value = stackInfo.inValues[stackInfo.inValues.Count - 1 - restParams];
+
+                if (value.producedBy.Count != 1)
+                    throw new InvalidOperationException($"Invalid this param value source for random call at IL_{instr.Offset:x4}");
+
+                thisLoadInstr = value.producedBy[0];
+
+                if (!thisLoadInstr.MatchLdsfld<Main>("rand") && !thisLoadInstr.MatchLdarg(0))
+                    throw new InvalidOperationException($"Invalid this param value source (at IL_{thisLoadInstr.Offset:x4}) for random call at IL_{instr.Offset:x4}");
+            }
+
+            int passingStackValueCount = stackInfo.outValues.Count - 1;
+            StackValue[] passingStackValues = new StackValue[passingStackValueCount];
+            for (int vi = 0; vi < passingStackValueCount; vi++)
+            {
+                passingStackValues[vi] = stackInfo.outValues[vi];
+            }
 
             c.Goto(c.Instrs.IndexOf(instr) + 1);
             ValueHandlerType? valueHandler = TryCreateValueHandler(c);
@@ -241,14 +274,7 @@ class RandomCallRewriter
                 c.Goto(c.Instrs.IndexOf(instr) - 1);
                 Instruction lastParamInitInstr = c.Next!;
 
-                ParamProvider<int>? param = TryCreateSingleIntProvider(c, out ILLabel[]? incomingLabels);
-                if (param is null)
-                {
-                    ReportInvalid("random call parameters", c.Context, c.Instrs.IndexOf(lastParamInitInstr), 10, 2);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
-                    unknownPatterns++;
-                    continue;
-                }
+                ParamProvider<int> param = CreateSingleIntProvider(c);
 
                 SimulationNode? node = TryBuildSingleIntSimulationNode(method, param, valueHandler.Value);
                 if (node is null)
@@ -259,9 +285,15 @@ class RandomCallRewriter
                     continue;
                 }
 
-                c.Goto(instr);
+                if (thisLoadInstr is not null)
+                {
+                    c.Goto(thisLoadInstr);
+                    c.Remove();
+                }
+
+                c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, param.ParameterInputBehavior, incomingLabels);
+                EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -275,14 +307,7 @@ class RandomCallRewriter
                 c.Goto(c.Instrs.IndexOf(instr) - 1);
                 Instruction lastParamInitInstr = c.Next!;
 
-                ParamProvider<(int, int)>? param = TryCreateDoubleIntProvider(c, out ILLabel[]? incomingLabels);
-                if (param is null)
-                {
-                    ReportInvalid("random call parameters", c.Context, c.Instrs.IndexOf(lastParamInitInstr), 10, 2);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
-                    unknownPatterns++;
-                    continue;
-                }
+                ParamProvider<(int, int)> param = CreateDoubleIntProvider(c);
 
                 SimulationNode? node = TryBuildDoubleIntSimulationNode(method, param, valueHandler.Value);
                 if (node is null)
@@ -293,9 +318,15 @@ class RandomCallRewriter
                     continue;
                 }
 
-                c.Goto(instr);
+                if (thisLoadInstr is not null)
+                {
+                    c.Goto(thisLoadInstr);
+                    c.Remove();
+                }
+
+                c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, param.ParameterInputBehavior, incomingLabels);
+                EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -306,7 +337,7 @@ class RandomCallRewriter
                 c.Goto(c.Instrs.IndexOf(instr) - 1);
                 Instruction lastParamInitInstr = c.Next!;
 
-                ParamProvider<int[]>? param = TryCreateIntArrayProvider(c, out ILLabel[]? incomingLabels);
+                ParamProvider<int[]>? param = TryCreateIntArrayProvider(c);
                 if (param is null)
                 {
                     ReportInvalid("random call parameters", c.Context, c.Instrs.IndexOf(lastParamInitInstr), 10, 2);
@@ -324,9 +355,15 @@ class RandomCallRewriter
                     continue;
                 }
 
-                c.Goto(instr);
+                if (thisLoadInstr is not null)
+                {
+                    c.Goto(thisLoadInstr);
+                    c.Remove();
+                }
+
+                c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, param.ParameterInputBehavior, incomingLabels);
+                EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -346,23 +383,23 @@ class RandomCallRewriter
         }
     }
 
-    private void EmitNode(ILCursor c, SimulationNode node, NodeParameterInputBehavior pb, ILLabel[]? incomingLabels)
+    private void EmitNode(ILCursor c, SimulationNode node, NodeParameterInputBehavior pb, StackValue[] stackValues)
     {
         ILLabel afterStopHandler = c.DefineLabel();
 
         ILLabel entryJumpLabel = c.DefineLabel();
-        c.MarkLabel(entryJumpLabel);
-
         entryJumps.Add(entryJumpLabel);
-        c.Emit(OpCodes.Ldarg, contextParam);
 
-        if (incomingLabels is not null)
+        if (stackValues.Length > 0)
         {
-            foreach (ILLabel label in incomingLabels)
-            {
-                label.Target = c.Prev;
-            }
+            throw new NotImplementedException("entry land with stack values");
         }
+        else
+        {
+            c.MarkLabel(entryJumpLabel);
+        }
+
+        c.Emit(OpCodes.Ldarg, contextParam);
 
         c.Emit(OpCodes.Ldc_I4, nodes.Count);
         switch (pb)
@@ -380,8 +417,14 @@ class RandomCallRewriter
         c.Emit(OpCodes.Ldloc, stopVar);
         c.Emit(OpCodes.Brfalse, afterStopHandler);
 
-        // stack: [rolledValue]
+        // rolledValue
         c.Emit(OpCodes.Pop);
+
+        foreach (var _ in stackValues)
+        {
+            c.Emit(OpCodes.Pop);
+        }
+        
         c.Emit(OpCodes.Ret);
 
         c.MarkLabel(afterStopHandler);
@@ -389,125 +432,56 @@ class RandomCallRewriter
         nodes.Add(node);
     }
 
-
-    // TODO: Param provider shouldn't care about Main.rand, needs stack analyzer to remove the correct random instance load
-    private ParamProvider<int>? TryCreateSingleIntProvider(ILCursor c, out ILLabel[]? incomingLabels)
+    private ParamProvider<int> CreateSingleIntProvider(ILCursor c)
     {
-        incomingLabels = null;
-
         int staticValue = 0;
         if (c.Index > 0 && SpawnAnalyzer.MatchInstructions(
-            c.Context, c.Index - 1, out _,
-            x => x.MatchLdsfld<Main>("rand") || x.MatchLdarg(0),
+            c.Context, c.Index, out _,
             x => x.MatchLdcI4(out staticValue)
         ))
         {
-
-            c.Goto(c.Index - 1);
-            incomingLabels = c.IncomingLabels.ToArray();
-            c.RemoveRange(2);
+            c.Remove();
 
             return new StaticParamProvider<int>(staticValue);
         }
 
-        if (c.Index > 0 && SpawnAnalyzer.MatchInstructions(
-            c.Context, c.Index - 1, out _,
-            x => x.MatchLdsfld<Main>("rand") || x.MatchLdarg(0),
-            x => x.MatchLdloc(out _)
-        ))
-        {
+        c.Index += 1;
 
-            c.Goto(c.Index - 1);
-            ILLabel[] tempIncomingLabels = c.IncomingLabels.ToArray();
-            c.Remove();
-            foreach (ILLabel label in tempIncomingLabels)
-            {
-                label.Target = c.Next;
-            }
-            c.Index += 1;
-            c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
-            c.Emit(OpCodes.Stloc, nodeParamVar);
+        c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
+        c.Emit(OpCodes.Stloc, nodeParamVar);
 
-            return new RuntimeParamVarCastParamProvider<int>();
-        }
-
-        if (c.Index > 0 && SpawnAnalyzer.MatchInstructions(
-            c.Context, c.Index - 1, out _,
-            x => x.MatchLdsfld<Main>("rand") || x.MatchLdarg(0),
-            x => x.MatchLdsfld(out _)
-        ))
-        {
-            c.Goto(c.Index - 1);
-            ILLabel[] tempIncomingLabels = c.IncomingLabels.ToArray();
-            c.Remove();
-            foreach (ILLabel label in tempIncomingLabels)
-            {
-                label.Target = c.Next;
-            }
-            c.Index += 1;
-            c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
-            c.Emit(OpCodes.Stloc, nodeParamVar);
-
-            return new RuntimeParamVarCastParamProvider<int>();
-        }
-
-        if (c.Index >= 3 && SpawnAnalyzer.MatchInstructions(
-            c.Context, c.Index - 3, out _,
-            x => x.MatchLdsfld<Main>("rand") || x.MatchLdarg(0),
-            x => x.MatchLdsfld(out _),
-            x => x.MatchLdcI4(out _),
-            x => x.MatchDiv()
-        ))
-        {
-            c.Goto(c.Index - 3);
-            ILLabel[] tempIncomingLabels = c.IncomingLabels.ToArray();
-            c.Remove();
-            foreach (ILLabel label in tempIncomingLabels)
-            {
-                label.Target = c.Next;
-            }
-            c.Index += 3;
-            c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
-            c.Emit(OpCodes.Stloc, nodeParamVar);
-
-            return new RuntimeParamVarCastParamProvider<int>();
-        }
-
-        return null;
+        return new RuntimeParamVarCastParamProvider<int>();
     }
 
-    private ParamProvider<(int, int)>? TryCreateDoubleIntProvider(ILCursor c, out ILLabel[]? incomingLabels)
+    private ParamProvider<(int, int)> CreateDoubleIntProvider(ILCursor c)
     {
         int staticValue0 = 0;
         int staticValue1 = 0;
-        if (c.Index >= 2 && SpawnAnalyzer.MatchInstructions(
-            c.Context, c.Index - 2, out _,
-            x => x.MatchLdsfld<Main>("rand"),
+        if (c.Index >= 1 && SpawnAnalyzer.MatchInstructions(
+            c.Context, c.Index - 1, out _,
             x => x.MatchLdcI4(out staticValue0),
             x => x.MatchLdcI4(out staticValue1)
         ))
         {
-
-            c.Goto(c.Index - 2);
-            incomingLabels = c.IncomingLabels.ToArray();
-            c.RemoveRange(3);
+            c.Goto(c.Index - 1);
+            c.RemoveRange(2);
 
             return new StaticParamProvider<(int, int)>((staticValue0, staticValue1));
         }
 
-        incomingLabels = null;
-        return null;
+        c.Index += 1;
+        c.Emit<RandomCallRewriter>(OpCodes.Call, nameof(PackTwoIntTupleBoxed));
+        c.Emit(OpCodes.Stloc, nodeParamVar);
+
+        return new RuntimeParamVarCastParamProvider<(int, int)>();
     }
 
-    private ParamProvider<int[]>? TryCreateIntArrayProvider(ILCursor c, out ILLabel[]? incomingLabels)
+    private ParamProvider<int[]>? TryCreateIntArrayProvider(ILCursor c)
     {
-        incomingLabels = null;
-
         TypeReference intType = c.Context.Import(typeof(int));
         int arraySize = 0;
         IMetadataTokenProvider? arrayData = null;
-        if (c.Index >= 5 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 5, out _,
-            x => x.MatchLdsfld<Main>("rand"),
+        if (c.Index >= 4 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 4, out _,
             x => x.MatchLdcI4(out arraySize),
             x => x.MatchNewarr(intType),
             x => x.MatchDup(),
@@ -515,50 +489,29 @@ class RandomCallRewriter
             x => x.MatchCall("System.Runtime.CompilerServices.RuntimeHelpers", "InitializeArray")
         ) && arrayData is FieldReference field)
         {
-            c.Index -= 5;
-            incomingLabels = c.IncomingLabels.ToArray();
-            c.RemoveRange(6);
+            c.Index -= 4;
+            c.RemoveRange(5);
 
             var ints = new int[arraySize];
             RuntimeHelpers.InitializeArray(ints, field.ResolveReflection().FieldHandle);
-            
+
             return new StaticParamProvider<int[]>(ints);
         }
 
-        if (c.Index >= 2 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 2, out _,
-            x => x.MatchLdsfld<Main>("rand"),
-            x => x.MatchLdloc(out _),
-            x => x.MatchCallOrCallvirt(out MethodReference? m) && m.Name == "ToArray"
-        ))
-        {
-            c.Index -= 2;
-            ILLabel[] tempIncomingLabels = c.IncomingLabels.ToArray();
-            c.Remove();
-            foreach (ILLabel label in tempIncomingLabels)
-            {
-                label.Target = c.Next;
-            }
-            c.Index += 2;
-            c.Emit(OpCodes.Stloc, nodeParamVar);
-            
-            return new RuntimeParamVarCastParamProvider<int[]>();
-        }
-        
-        return null;
+        c.Index += 1;
+        c.Emit(OpCodes.Stloc, nodeParamVar);
+
+        return new RuntimeParamVarCastParamProvider<int[]>();
     }
 
-    private ValueHandlerType? TryCreateValueHandler(ILCursor c)
+    private ValueHandlerType TryCreateValueHandler(ILCursor c)
     {
         if (c.Next!.MatchBrfalse(out _) || c.Next!.MatchBrtrue(out _))
         {
             return ValueHandlerType.SimpleBranch;
         }
-        else if (c.Next!.MatchStloc(out _) || c.Next!.MatchDup())
-        {
-            return ValueHandlerType.AllUnique;
-        }
 
-        return null;
+        return ValueHandlerType.AllUnique;
     }
 
     private SimulationNode? TryBuildSingleIntSimulationNode(MethodReference method, ParamProvider<int> param, ValueHandlerType valHandler)
@@ -596,6 +549,11 @@ class RandomCallRewriter
             AssemblyPrint.Print(c.Instrs[i]);
             Console.WriteLine();
         }
+    }
+
+    private static object PackTwoIntTupleBoxed(int a, int b)
+    {
+        return (a, b);
     }
 }
 

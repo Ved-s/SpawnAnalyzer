@@ -46,10 +46,11 @@ public class SpawnAnNPCRewriter
 
         il.Invoke((il) => ls = RewriteMethodInternal(il, nodes));
 
+        var stack = StackAnalyzer.Analyze(il);
+        il.FancyPrintout(stack.instructions);
+
         Console.WriteLine("Rewrite OK");
         Console.WriteLine();
-
-        il.FancyPrintout();
 
         DMDHack.SetNullOriginalMethod(dmd);
 
@@ -79,7 +80,7 @@ public class SpawnAnNPCRewriter
 
         RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, entryJumps);
 
-        randomRewriter.RewriteRandomCalls(c);
+        randomRewriter.RewriteRandomCalls(c, stack);
 
         c.Index = 0;
 
@@ -97,6 +98,24 @@ public class SpawnAnNPCRewriter
             x => x.MatchCallOrCallvirt<NPC.Spawner>("SpawnNPC")
         ))
         {
+            MethodReference spawnNpcMethod = (MethodReference)c.Next!.Operand;
+            InstructionStackInfo stackInfo = stack.LookupInstruction(c.Next, out _)
+                ?? throw new InvalidOperationException("Stack analysis out of date or invalid");
+
+            int restParams = spawnNpcMethod.Parameters.Count;
+            StackValue value = stackInfo.inValues[stackInfo.inValues.Count - 1 - restParams];
+
+            if (value.producedBy.Count != 1)
+                throw new InvalidOperationException($"Invalid this param value source for random call at IL_{c.Next.Offset:x4}");
+
+            Instruction thisLoadInstr = value.producedBy[0];
+
+            if (!thisLoadInstr.MatchLdarg(0))
+                throw new InvalidOperationException($"Invalid this param value source (at IL_{thisLoadInstr.Offset:x4}) for random call at IL_{c.Next.Offset:x4}");
+            
+            thisLoadInstr.OpCode = OpCodes.Ldarg;
+            thisLoadInstr.Operand = contextParam;
+
             if (SpawnAnalyzer.MatchInstructions(il, c.Index - 6, out _,
                 x => x.MatchLdcI4(out _),
                 x => x.MatchLdcR4(out _),
@@ -109,9 +128,7 @@ public class SpawnAnNPCRewriter
             {
                 c.Index -= 6;
                 c.RemoveRange(7);
-                c.Emit(OpCodes.Ldarg, contextParam);
-                c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHitReorderedArgs");
-                c.Emit(OpCodes.Pop);
+                c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHit");
             }
             else
             {
@@ -154,7 +171,6 @@ public class SpawnAnNPCRewriter
 
                 Environment.Exit(1);
             }
-
         }
 
         c.Index = 0;
@@ -201,15 +217,14 @@ public class SpawnAnNPCRewriter
         c.Emit(OpCodes.Ldnull);
         c.Emit(OpCodes.Stloc, randomParamVar);
 
-        entryJumps.Add(mainEntryLabel);
-
-        c.Emit(OpCodes.Ldarga, 0);
+        c.Emit(OpCodes.Ldarga, entryParam);
         c.Emit<int?>(OpCodes.Call, "get_HasValue");
         c.Emit(OpCodes.Brfalse, mainEntryLabel);
 
-        c.Emit(OpCodes.Ldarga, 0);
+        c.Emit(OpCodes.Ldarga, entryParam);
         c.Emit<int?>(OpCodes.Call, "get_Value");
         c.Emit(OpCodes.Switch, entryJumps.ToArray());
+        c.Emit(OpCodes.Ret);
         c.MarkLabel(mainEntryLabel);
 
         il.Method.Parameters.Clear();

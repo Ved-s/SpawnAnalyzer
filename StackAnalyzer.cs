@@ -76,6 +76,7 @@ public class StackAnalyzer
                     break;
 
                 case StackBehaviour.Popi:
+                case StackBehaviour.Popref:
                 case StackBehaviour.Pop1:
                     if (info.outValues.Count == 0)
                         throw new InvalidProgramException($"Not enough values on the stack for {instr}");
@@ -84,6 +85,7 @@ public class StackAnalyzer
                     info.outValues.RemoveAt(info.outValues.Count - 1);
                     break;
 
+                case StackBehaviour.Popref_pop1:
                 case StackBehaviour.Pop1_pop1:
                     if (info.outValues.Count < 2)
                         throw new InvalidProgramException($"Not enough values on the stack for {instr}");
@@ -107,9 +109,9 @@ public class StackAnalyzer
                     break;
 
                 case StackBehaviour.Varpop:
-                    if (instr.MatchCallOrCallvirt(out MethodReference? method))
+                    if (instr.MatchCallOrCallvirt(out MethodReference? method) || instr.MatchNewobj(out method))
                     {
-                        if (method.HasThis)
+                        if (method.HasThis && instr.OpCode != OpCodes.Newobj)
                         {
                             if (info.outValues.Count == 0)
                                 throw new InvalidProgramException($"Not enough values on the stack for {instr}");
@@ -159,12 +161,12 @@ public class StackAnalyzer
                 case StackBehaviour.Pushref:
                     StackValue value;
 
-                    if (instr.MatchLdsfld(out FieldReference? field))
+                    if (instr.MatchLdsfld(out FieldReference? field) || instr.MatchLdfld(out field))
                     {
                         FieldInfo fieldInfo = field.ResolveReflection();
-                        value = new(new StackValueOrigin.StaticField(fieldInfo), fieldInfo.FieldType, SimpleTypeFromSystemType(fieldInfo.FieldType));
+                        value = new(new StackValueOrigin.Field(fieldInfo), fieldInfo.FieldType, SimpleTypeFromSystemType(fieldInfo.FieldType));
                     }
-                    else if (instr.MatchLdarg(out int arg))
+                    else if (instr.MatchLdarg(out int arg) || instr.MatchLdarga(out arg))
                     {
                         ParameterDefinition? param = null;
                         if (instr.Operand is ParameterDefinition p)
@@ -177,11 +179,52 @@ public class StackAnalyzer
                         }
                         Type? type = param?.ParameterType.ResolveReflection();
 
-                        value = new(
-                            new StackValueOrigin.Parameter(arg),
-                            type,
-                            type is null ? SimpleType.Object : SimpleTypeFromSystemType(type)
-                        );
+                        if (instr.OpCode == OpCodes.Ldarga || instr.OpCode == OpCodes.Ldarga_S)
+                        {
+                            value = new(
+                                new StackValueOrigin.Parameter(arg),
+                                type?.MakeByRefType(),
+                                SimpleType.Reference
+                            );
+                        }
+                        else
+                        {
+                            value = new(
+                                new StackValueOrigin.Parameter(arg),
+                                type,
+                                type is null ? SimpleType.Object : SimpleTypeFromSystemType(type)
+                            );
+                        }
+                    }
+                    else if (instr.MatchLdloc(out int loc) || instr.MatchLdloca(out loc))
+                    {
+                        VariableReference? variable = null;
+                        if (instr.Operand is VariableReference v)
+                        {
+                            variable = v;
+                        }
+                        else if (loc >= 0 && il.Body.Variables.Count > loc)
+                        {
+                            variable = il.Body.Variables[loc];
+                        }
+                        Type? type = variable?.VariableType.ResolveReflection();
+
+                        if (instr.OpCode == OpCodes.Ldloca || instr.OpCode == OpCodes.Ldloca_S)
+                        {
+                            value = new(
+                                new StackValueOrigin.Local(loc),
+                                type?.MakeByRefType(),
+                                SimpleType.Reference
+                            );
+                        }
+                        else
+                        {
+                            value = new(
+                                new StackValueOrigin.Local(loc),
+                                type,
+                                type is null ? SimpleType.Object : SimpleTypeFromSystemType(type)
+                            );
+                        }
                     }
                     else if (TwoParamMathOpcodes.Contains(opCode))
                     {
@@ -219,10 +262,26 @@ public class StackAnalyzer
                     {
                         value = new(new StackValueOrigin.ConstDouble(doubleValue), typeof(int), SimpleType.Integer);
                     }
+                    else if (instr.MatchLdnull())
+                    {
+                        value = new(new StackValueOrigin.Null(), null, SimpleType.Object);
+                    }
                     else if (instr.MatchNewarr(out TypeReference? arrayType))
                     {
                         Type type = arrayType.ResolveReflection().MakeArrayType();
                         value = new(null, type, SimpleType.Object);
+                    }
+                    else if (instr.MatchLdtoken(out IMetadataTokenProvider? token))
+                    {
+                        value = new(new StackValueOrigin.Token(token), null, SimpleType.Object);
+                    }
+                    else if (instr.MatchNewobj(out MethodReference? ctor))
+                    {
+                        value = new(null, ctor.DeclaringType.ResolveReflection(), SimpleType.Object);
+                    }
+                    else if (instr.MatchBox(out _))
+                    {
+                        value = new(null, typeof(object), SimpleType.Object);
                     }
                     else
                     {
@@ -315,6 +374,39 @@ public class StackAnalyzer
 
             switch (opCode.FlowControl)
             {
+                case FlowControl.Branch:
+                    Instruction? nextInstr = null;
+
+                    if (instr.Operand is Instruction ins1)
+                        nextInstr = ins1;
+
+                    else if (instr.Operand is ILLabel label1)
+                        nextInstr = label1.Target!;
+                    
+                    if (nextInstr is null)
+                        throw new InvalidProgramException($"Operand of {opCode} at IL_{instr.Offset:x4} wasn't pointing to an instruction");
+
+                    int index = il.Instrs.IndexOf(nextInstr);
+
+                    if (index < 0)
+                        throw new InvalidProgramException($"Operand of {opCode} at IL_{instr.Offset:x4} wasn't pointing to an instruction");
+
+                    if (populatedInstructionInputs[index])
+                    {
+                        MergeStackValues(infos[index].inValues, info.outValues, infos);
+                    }
+                    else
+                    {
+                        if (infos[index].inValues.Count > 0)
+                            throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
+
+                        infos[index].inValues.AddRange(info.outValues);
+                        populatedInstructionInputs[index] = true;
+                    }
+
+                    i = index - 1;
+                    continue;
+
                 case FlowControl.Call:
                 case FlowControl.Next:
                     if (populatedInstructionInputs[i + 1])
@@ -346,45 +438,55 @@ public class StackAnalyzer
                         populatedInstructionInputs[i + 1] = true;
                     }
 
-                    Instruction? nextInstr = null;
+
+                    IEnumerable<Instruction>? nextInstrs = null;
 
                     if (instr.Operand is Instruction ins)
-                        nextInstr = ins;
+                        nextInstrs = [ins];
 
                     else if (instr.Operand is ILLabel label)
-                        nextInstr = label.Target;
+                        nextInstrs = [label.Target!];
 
-                    if (nextInstr is not null)
+                    if (instr.Operand is Instruction[] inss)
+                        nextInstrs = inss;
+
+                    else if (instr.Operand is ILLabel[] labels)
+                        nextInstrs = labels.Select(l => l.Target!);
+
+                    if (nextInstrs is not null)
                     {
-                        int index = -1;
-                        for (int i1 = 0; i1 < infos.Count; i1++)
+                        foreach (Instruction nextInstr1 in nextInstrs)
                         {
-                            if (infos[i1].instruction == nextInstr)
+                            index = -1;
+                            for (int i1 = 0; i1 < infos.Count; i1++)
                             {
-                                index = i1;
-                                break;
+                                if (infos[i1].instruction == nextInstr1)
+                                {
+                                    index = i1;
+                                    break;
+                                }
                             }
-                        }
 
-                        if (index < 0)
-                            throw new InvalidProgramException($"Instruction {i} at IL_{instr.Offset:x4} points to invalid label");
+                            if (index < 0)
+                                throw new InvalidProgramException($"Instruction {i} at IL_{instr.Offset:x4} points to invalid label");
 
-                        if (populatedInstructionInputs[index])
-                        {
-                            MergeStackValues(infos[index].inValues, info.outValues, infos);
-                        }
-                        else
-                        {
-                            if (infos[index].inValues.Count > 0)
-                                throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
+                            if (populatedInstructionInputs[index])
+                            {
+                                MergeStackValues(infos[index].inValues, info.outValues, infos);
+                            }
+                            else
+                            {
+                                if (infos[index].inValues.Count > 0)
+                                    throw new InvalidProgramException("InstructionStackInfo.inValues populated at the wrong time");
 
-                            infos[index].inValues.AddRange(info.outValues);
-                            populatedInstructionInputs[index] = true;
-                        }
+                                infos[index].inValues.AddRange(info.outValues);
+                                populatedInstructionInputs[index] = true;
+                            }
 
-                        if (!processedInstructions[index])
-                        {
-                            indexesToProcess.Push(index);
+                            if (!processedInstructions[index])
+                            {
+                                indexesToProcess.Push(index);
+                            }
                         }
 
                         break;
@@ -406,7 +508,49 @@ public class StackAnalyzer
 
     static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos)
     {
-        throw new NotImplementedException();
+        if (into.Count != from.Count)
+            throw new InvalidProgramException("Mergin two stacks of different size");
+
+        for (int i = 0; i < into.Count; i++)
+        {
+            StackValue fromv = from[i];
+            StackValue intov = into[i];
+
+            if (intov.type is null)
+            {
+                intov.type = fromv.type;
+                intov.simpleType = fromv.simpleType;
+            }
+
+            intov.origin = null;
+
+            foreach (Instruction instr in fromv.producedBy)
+                if (!intov.producedBy.Contains(instr))
+                    intov.producedBy.Add(instr);
+
+            foreach (Instruction instr in fromv.consumedBy)
+                if (!intov.consumedBy.Contains(instr))
+                    intov.consumedBy.Add(instr);
+
+            foreach (InstructionStackInfo info in infos)
+            {
+                for (int j = 0; j < info.inValues.Count; j++)
+                {
+                    if (ReferenceEquals(info.inValues[j], fromv))
+                    {
+                        info.inValues[j] = intov;
+                    }
+                }
+
+                for (int j = 0; j < info.outValues.Count; j++)
+                {
+                    if (ReferenceEquals(info.outValues[j], fromv))
+                    {
+                        info.outValues[j] = intov;
+                    }
+                }
+            }
+        }
     }
 
     static SimpleType SimpleTypeFromSystemType(Type type)
@@ -510,12 +654,14 @@ public record StackValueOrigin
 {
     private StackValueOrigin() { }
 
-    public record StaticField(FieldInfo Field) : StackValueOrigin;
-    public record InstanceField(FieldInfo Field) : StackValueOrigin;
+    public record Field(FieldInfo Info) : StackValueOrigin;
     public record MethodCall(MethodBase Method) : StackValueOrigin;
     public record Parameter(int Param) : StackValueOrigin;
+    public record Local(int Index) : StackValueOrigin;
     public record ConstInt(int Value) : StackValueOrigin;
     public record ConstLong(long Value) : StackValueOrigin;
     public record ConstFloat(float Value) : StackValueOrigin;
     public record ConstDouble(double Value) : StackValueOrigin;
+    public record Token(IMetadataTokenProvider TokenProvider) : StackValueOrigin;
+    public record Null() : StackValueOrigin;
 }
