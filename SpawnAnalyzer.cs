@@ -44,7 +44,7 @@ public class SpawnAnalyzer
         MainSetupDrawInterfaceLayersHook = new Hook(typeof(Main).GetMethod("SetupDrawInterfaceLayers", (BindingFlags)(-1)), On_Main_SetupDrawInterfaceLayers);
 
         Stopwatch sw = Stopwatch.StartNew();
-        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(6));
+        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(7));
         sw.Stop();
         Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
 
@@ -57,8 +57,7 @@ public class SpawnAnalyzer
         sw.Stop();
 
         Console.WriteLine($"Simulated in {sw.ElapsedMilliseconds}ms, entry node {data.startNode}, visited {data.nodes.Count(n => n is not null)}/{d.Nodes.Length} nodes");
-
-        /*
+        
         for (int i = 0; i < data.nodes.Count; i++)
         {
             var node = data.nodes[i];
@@ -107,7 +106,7 @@ public class SpawnAnalyzer
                 }
             }
         }
-        */
+        
         Dictionary<int, (NodeRollParams, float)> spawns = new();
 
         // (node, timeline, branch, chance)

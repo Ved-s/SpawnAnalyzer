@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -10,22 +12,30 @@ using SpawnAnalyzer.Simulation;
 using Terraria;
 using Terraria.GameContent;
 using Terraria.Utilities;
+using OpCodes = Mono.Cecil.Cil.OpCodes;
+using ROpCodes = System.Reflection.Emit.OpCodes;
 
 namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
 
 class RandomCallRewriter
 {
-    readonly List<SimulationNode> nodes;
+    static int StackStatesGenerated = 0;
+
+    readonly List<SimulationNodeInfo> nodes;
     readonly ParameterDefinition contextParam;
     readonly VariableDefinition stopVar;
     readonly VariableDefinition nodeParamVar;
+    readonly VariableDefinition stackStateVar;
+    readonly VariableDefinition tempIntVar;
     readonly List<ILLabel> entryJumps;
 
     public RandomCallRewriter(
-        List<SimulationNode> nodes,
+        List<SimulationNodeInfo> nodes,
         ParameterDefinition contextParam,
         VariableDefinition stopVar,
         VariableDefinition randomParamVar,
+        VariableDefinition stackStateVar,
+        VariableDefinition tempIntVar,
         List<ILLabel> entryJumps
     )
     {
@@ -33,185 +43,10 @@ class RandomCallRewriter
         this.contextParam = contextParam;
         this.stopVar = stopVar;
         this.nodeParamVar = randomParamVar;
+        this.stackStateVar = stackStateVar;
+        this.tempIntVar = tempIntVar;
         this.entryJumps = entryJumps;
     }
-
-    /*
-    public void RewriteRandomCalls(ILCursor c)
-    {
-        ulong unknownPatterns = 0;
-        ulong knownPatterns = 0;
-
-        while (c.TryGotoNext(
-            x => x.MatchCallOrCallvirt<UnifiedRandom>("Next")
-              || x.MatchCall("Terraria.Utils", "SelectRandom")
-              || x.MatchCallOrCallvirt(out MethodReference? mr) && mr.Name.StartsWith("Roll")
-        ))
-        {
-            MethodReference next = (c.Next!.Operand as MethodReference)!;
-
-            if (next.Name == "Next")
-            {
-                int denominator = 0;
-                if (next.Parameters.Count == 1 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 2, out _,
-                    x => x.MatchLdsfld<Main>("rand"),
-                    x => x.MatchLdcI4(out denominator),
-                    _ => true,
-                    x => x.MatchBrtrue(out _) || x.MatchBrfalse(out _)
-                ))
-                {
-                    c.Index -= 2;
-                    Instruction oldFirstInstruction = c.Next;
-
-                    EmitRandomNode(c, oldFirstInstruction, new FixedChanceTwoBranchRandomNode(1f / denominator), RandomNodeParameterBehavior.AlwaysNull);
-
-                    c.Next = oldFirstInstruction;
-                    c.RemoveRange(3);
-
-                    knownPatterns++;
-                    continue;
-                }
-
-                if (next.Parameters.Count == 1 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 2, out _,
-                    x => x.MatchLdsfld<Main>("rand"),
-                    x => x.MatchLdcI4(out denominator),
-                    _ => true,
-                    x => x.MatchDup() || x.MatchStloc(out _)
-                ))
-                {
-                    c.Index -= 2;
-                    Instruction oldFirstInstruction = c.Next;
-
-                    EmitRandomNode(c, oldFirstInstruction, new FixedValueEqualChanceRangeRandomNode(0, denominator), RandomNodeParameterBehavior.AlwaysNull);
-
-                    c.Next = oldFirstInstruction;
-                    c.RemoveRange(3);
-
-                    knownPatterns++;
-                    continue;
-                }
-
-                // TODO: different return values
-                // int value = 0;
-                // if (next.Parameters.Count == 1 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 2, out _,
-                //     x => x.MatchLdsfld<Main>("rand"),
-                //     x => x.MatchLdcI4(out denominator),
-                //     _ => true,
-                //     x => x.MatchLdcI4(out value),
-                //     x => x.MatchBle(out _)
-                // ))
-                // {
-                //     c.Index -= 2;
-                //     Instruction oldFirstInstruction = c.Next;
-
-                //     float chance = (float)(denominator - value - 1) / denominator;
-                //     chance = Math.Min(Math.Max(0, chance), 1);
-
-                //     EmitRandomNode(oldFirstInstruction, new FixedChanceTwoBranchRandomNode(chance), RandomNodeParameterBehavior.AlwaysNull);
-
-                //     c.Next = oldFirstInstruction;
-                //     c.RemoveRange(4);
-
-                //     knownPatterns++;
-                //     continue;
-                // }
-
-                int rangeStart = 0;
-                int rangeEnd = 0;
-
-                if (next.Parameters.Count == 2 && SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 3, out _,
-                    x => x.MatchLdsfld<Main>("rand"),
-                    x => x.MatchLdcI4(out rangeStart),
-                    x => x.MatchLdcI4(out rangeEnd),
-                    _ => true
-                ))
-                {
-                    c.Index -= 3;
-                    Instruction oldFirstInstruction = c.Next;
-
-                    EmitRandomNode(c, oldFirstInstruction, new FixedValueEqualChanceRangeRandomNode(rangeStart, rangeEnd), RandomNodeParameterBehavior.AlwaysNull);
-
-                    c.Next = oldFirstInstruction;
-                    c.RemoveRange(4);
-
-                    knownPatterns++;
-                    continue;
-                }
-            }
-            else if (next.Name == "SelectRandom")
-            {
-                TypeReference intType = c.Context.Import(typeof(int));
-                int arraySize = 0;
-                IMetadataTokenProvider? arrayData = null;
-                if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 6, out _,
-                    x => x.MatchLdsfld<Main>("rand"),
-                    x => x.MatchLdcI4(out arraySize),
-                    x => x.MatchNewarr(intType),
-                    x => x.MatchDup(),
-                    x => x.MatchLdtoken(out arrayData),
-                    x => x.MatchCall("System.Runtime.CompilerServices.RuntimeHelpers", "InitializeArray"),
-                    _ => true
-                ) && arrayData is FieldReference field)
-                {
-                    var ints = new int[arraySize];
-                    RuntimeHelpers.InitializeArray(ints, field.ResolveReflection().FieldHandle);
-
-                    c.Index -= 6;
-                    Instruction oldFirstInstruction = c.Next;
-
-                    EmitRandomNode(c, oldFirstInstruction, new FixedValueEqualChanceIdArrayRandomNode(ints), RandomNodeParameterBehavior.AlwaysNull);
-
-                    c.Next = oldFirstInstruction;
-                    c.RemoveRange(7);
-
-                    knownPatterns++;
-                    continue;
-                }
-                else if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 3, out _,
-                    x => x.MatchLdsfld<Main>("rand"),
-                    x => x.MatchLdloc(out _),
-                    x => x.MatchCallOrCallvirt(out _)
-                ))
-                {
-                    c.Index -= 3;
-                    c.Next.OpCode = OpCodes.Nop;
-                    c.Next.Operand = null;
-
-                    c.Index += 3;
-                    c.Remove();
-
-                    c.Emit(OpCodes.Stloc, randomParamVar);
-
-                    EmitRandomNode(c, null, new DynamicValueEqualChanceIdArrayRandomNode(), RandomNodeParameterBehavior.LoadFromParamVar);
-
-                    knownPatterns++;
-                    continue;
-                }
-            }
-
-            Console.WriteLine($"\n\x1b[1mUnsupported random at IL_{c.Next!.Offset:x4}:\x1b[0m");
-
-            for (int i = Math.Max(0, c.Index - 10); i <= Math.Min(c.Index + 5, c.Instrs.Count); i++)
-            {
-                if (i == c.Index)
-                    Console.Write("-> ");
-                else
-                    Console.Write("   ");
-                AssemblyPrint.Print(c.Instrs[i]);
-                Console.WriteLine();
-            }
-
-            unknownPatterns++;
-        }
-
-        if (unknownPatterns > 0)
-        {
-            double percent = (double)knownPatterns / (knownPatterns + unknownPatterns) * 100;
-            Console.WriteLine($"\n{percent:0.0}% ({knownPatterns}/{knownPatterns + unknownPatterns}) of Random calls were patched");
-            Environment.Exit(1);
-        }
-    }
-    */
 
     public void RewriteRandomCalls(ILCursor c, StackAnalysis stack)
     {
@@ -227,7 +62,7 @@ class RandomCallRewriter
             Instruction instr = c.Next!;
             MethodReference method = (instr.Operand as MethodReference)!;
 
-            InstructionStackInfo stackInfo = stack.LookupInstruction(instr, out _) 
+            InstructionStackInfo stackInfo = stack.LookupInstruction(instr, out _)
                 ?? throw new InvalidOperationException("Stack analysis out of date or invalid");
 
             Instruction? thisLoadInstr = null;
@@ -390,14 +225,71 @@ class RandomCallRewriter
         ILLabel entryJumpLabel = c.DefineLabel();
         entryJumps.Add(entryJumpLabel);
 
+        // TODO: cache
+        StateType? stackStateType = null;
+
+        List<StackValuePreserveType> stackValuePreserves = new();
+
         if (stackValues.Length > 0)
         {
-            throw new NotImplementedException("entry land with stack values");
+            Console.WriteLine("Preserve stack values:");
+            for (int i = 0; i < stackValues.Length; i++)
+            {
+                string type = stackValues[i].type?.ToString() ?? "UnknownType";
+                Console.WriteLine($" [{i}] {stackValues[i].simpleType} {type}");
+            }
+
+            int? spawnNPCThisArg = null;
+            List<Type> typesToPreserve = new();
+
+            for (int i = 0; i < stackValues.Length; i++)
+            {
+                StackValue sv = stackValues[i];
+                if (sv.type is null)
+                {
+                    throw new InvalidOperationException("Can't preserve stack value of unknown type");
+                }
+                if (sv.simpleType == SimpleType.Reference)
+                {
+                    throw new InvalidOperationException("Can't preserve stack value of reference type");
+                }
+
+                // TODO: optimize common patterns
+                StackValuePreserveType pt = StackValuePreserveType.Preserve;
+
+                if (spawnNPCThisArg is null
+                    && sv.consumedBy.Count == 1
+                    && sv.consumedBy[0].MatchCallOrCallvirt(out MethodReference? consumerMethod)
+                    && consumerMethod.Name == "SpawnNPC"
+                )
+                {
+                    spawnNPCThisArg = i;
+                    pt = StackValuePreserveType.ContextParam;
+                }
+
+                if (pt == StackValuePreserveType.Preserve)
+                {
+                    typesToPreserve.Add(sv.type);
+                }
+                stackValuePreserves.Add(pt);
+
+                Console.WriteLine($"Stack value {i}: {pt}");
+            }
+
+            stackStateType = StateType.Generate($"RandomCallStackState_{StackStatesGenerated}", typesToPreserve);
+            StackStatesGenerated++;
+
+            MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackValues, stackValuePreserves, stackStateType.Type);
+            c.Emit(OpCodes.Ldarg, contextParam);
+            c.Emit(OpCodes.Call, stackSaveMethod);
+
+            // foreach (var _ in stackValuePreserves)
+            // {
+            //     c.Emit(OpCodes.Pop);
+            // }
         }
-        else
-        {
-            c.MarkLabel(entryJumpLabel);
-        }
+
+        c.MarkLabel(entryJumpLabel);
 
         c.Emit(OpCodes.Ldarg, contextParam);
 
@@ -419,17 +311,46 @@ class RandomCallRewriter
 
         // rolledValue
         c.Emit(OpCodes.Pop);
-
-        foreach (var _ in stackValues)
-        {
-            c.Emit(OpCodes.Pop);
-        }
-        
         c.Emit(OpCodes.Ret);
 
         c.MarkLabel(afterStopHandler);
 
-        nodes.Add(node);
+        if (stackValuePreserves.Count > 0)
+        {
+            c.Emit(OpCodes.Stloc, tempIntVar);
+
+
+            // TODO: don't create state type when nothing is being preserved
+            c.Emit(OpCodes.Ldarg, contextParam);
+            c.Emit<SpawnSimulationContext>(OpCodes.Call, "GetLastNodeStackStateClone");
+            c.Emit(OpCodes.Stloc, stackStateVar);
+
+            int fieldIndex = 0;
+            for (int i = 0; i < stackValuePreserves.Count; i++)
+            {
+                switch (stackValuePreserves[i])
+                {
+                    case StackValuePreserveType.Preserve:
+                        c.Emit(OpCodes.Ldloc, stackStateVar);
+                        c.Emit(OpCodes.Ldfld, stackStateType!.Type.GetField(StateType.GetFieldName(fieldIndex), (BindingFlags)(-1)));
+                        fieldIndex++;
+                        break;
+                    
+                    case StackValuePreserveType.ContextParam:
+                        c.Emit(OpCodes.Ldarg, contextParam);
+                        break;
+
+                    default:
+                        throw new NotImplementedException($"Restore StackValuePreserveType.{stackValuePreserves[i]} onto stack");
+                }
+            }
+
+            c.Emit(OpCodes.Ldloc, tempIntVar);
+        }
+
+        SimulationNodeInfo info = new(stackStateType, node);
+
+        nodes.Add(info);
     }
 
     private ParamProvider<int> CreateSingleIntProvider(ILCursor c)
@@ -506,11 +427,17 @@ class RandomCallRewriter
 
     private ValueHandlerType TryCreateValueHandler(ILCursor c)
     {
-        if (c.Next!.MatchBrfalse(out _) || c.Next!.MatchBrtrue(out _))
+        Instruction ins = c.Next!;
+        if (ins.MatchBrfalse(out _) || ins.MatchBrtrue(out _))
         {
             return ValueHandlerType.SimpleBranch;
         }
+        else if (ins.MatchStloc(out _))
+        {
+            return ValueHandlerType.AllUnique;
+        }
 
+        Console.WriteLine($"Warning: Unknown random value handling pattern (at IL_{ins.Offset:x4}), simulation may take long time");
         return ValueHandlerType.AllUnique;
     }
 
@@ -555,6 +482,71 @@ class RandomCallRewriter
     {
         return (a, b);
     }
+
+    private static MethodInfo GenerateStackSaveMethod(StackValue[] values, List<StackValuePreserveType> preserves, Type stackStateType)
+    {
+        Type[] pt = new Type[values.Length+1];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            switch (preserves[i])
+            {
+                case StackValuePreserveType.Preserve:
+                    pt[i] = values[i].type!;
+                    break;
+
+                case StackValuePreserveType.ContextParam:
+                    pt[i] = typeof(object);
+                    break;
+
+                default:
+                    throw new NotImplementedException($"GenerateStackSaveMethod StackValuePreserveType.{preserves[i]}");
+            }
+        }
+
+        pt[pt.Length-1] = typeof(SpawnSimulationContext);
+
+        DynamicMethod dmd = new($"StackSave_{stackStateType.Name}", typeof(void), pt);
+
+        ILGenerator il = dmd.GetILGenerator();
+
+        LocalBuilder stateVar = il.DeclareLocal(stackStateType);
+
+        MethodInfo createInstance = typeof(Activator)
+            .GetMethods()
+            .FirstOrDefault(m => m.Name == "CreateInstance" && m.IsGenericMethod)
+            .MakeGenericMethod([stackStateType]);
+
+        il.Emit(ROpCodes.Call, createInstance);
+        il.Emit(ROpCodes.Stloc, stateVar);
+
+        int fieldIndex = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (preserves[i] == StackValuePreserveType.Preserve)
+            {
+                il.Emit(ROpCodes.Ldloc, stateVar);
+                il.Emit(ROpCodes.Ldarg, i);
+                il.Emit(ROpCodes.Stfld, stackStateType.GetField(StateType.GetFieldName(fieldIndex), (BindingFlags)(-1)));
+
+                fieldIndex++;
+            }
+        }
+
+        il.Emit(ROpCodes.Ldarg, pt.Length-1);
+        il.Emit(ROpCodes.Ldloc, stateVar);
+        il.Emit(ROpCodes.Stfld, typeof(SpawnSimulationContext).GetField("stackState", (BindingFlags)(-1)));
+
+        il.Emit(ROpCodes.Ret);
+
+        return dmd;
+    }
+}
+
+enum StackValuePreserveType
+{
+    Preserve,
+    ContextParam,
 }
 
 enum NodeParameterInputBehavior

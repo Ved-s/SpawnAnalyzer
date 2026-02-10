@@ -262,7 +262,8 @@ static class AssemblyPrint
 
         Print(method.ReturnType);
         Console.Write(" ");
-        Print(method.DeclaringType, false);
+        if (method.DeclaringType is not null)
+            Print(method.DeclaringType, false);
         Console.Write(DnSpyAnsiColors.punctuation);
         Console.Write("::");
         if (method.ExplicitThis)

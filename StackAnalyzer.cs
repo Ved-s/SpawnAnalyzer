@@ -111,6 +111,33 @@ public class StackAnalyzer
                 case StackBehaviour.Varpop:
                     if (instr.MatchCallOrCallvirt(out MethodReference? method) || instr.MatchNewobj(out method))
                     {
+                        if (string.IsNullOrEmpty(method.Name) && method.DeclaringType is null)
+                        {
+                            MethodBase m = method.ResolveReflection();
+
+                            if (m is MethodInfo minfo)
+                            {
+                                if (!minfo.IsStatic && instr.OpCode != OpCodes.Newobj)
+                                {
+                                    if (info.outValues.Count == 0)
+                                        throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                                }
+                                var ps = minfo.GetParameters();
+                                for (int j = 0; j < ps.Length; j++)
+                                {
+                                    if (info.outValues.Count == 0)
+                                        throw new InvalidProgramException($"Not enough values on the stack for {instr}");
+
+                                    info.outValues[info.outValues.Count - 1].consumedBy.Add(instr);
+                                    info.outValues.RemoveAt(info.outValues.Count - 1);
+                                }
+                                break;
+                            }
+                        }
+
                         if (method.HasThis && instr.OpCode != OpCodes.Newobj)
                         {
                             if (info.outValues.Count == 0)
@@ -299,12 +326,11 @@ public class StackAnalyzer
                 case StackBehaviour.Varpush:
                     if (instr.MatchCallOrCallvirt(out MethodReference? method))
                     {
-                        if (!method.ReturnType.Is(typeof(void)))
+                        MethodBase methodInfo = method.ResolveReflection();
+                        Type? returnType = (methodInfo as MethodInfo)?.ReturnType;
+
+                        if (returnType is not null && returnType != typeof(void))
                         {
-                            MethodBase methodInfo = method.ResolveReflection();
-
-                            Type? returnType = (methodInfo as MethodInfo)?.ReturnType;
-
                             value = new(
                                 new StackValueOrigin.MethodCall(methodInfo),
                                 returnType,
@@ -313,6 +339,7 @@ public class StackAnalyzer
 
                             value.producedBy.Add(instr);
                             info.outValues.Add(value);
+                            break;
                         }
                     }
                     else
@@ -382,7 +409,7 @@ public class StackAnalyzer
 
                     else if (instr.Operand is ILLabel label1)
                         nextInstr = label1.Target!;
-                    
+
                     if (nextInstr is null)
                         throw new InvalidProgramException($"Operand of {opCode} at IL_{instr.Offset:x4} wasn't pointing to an instruction");
 
@@ -509,9 +536,9 @@ public class StackAnalyzer
     static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos)
     {
         if (into.Count != from.Count)
-            throw new InvalidProgramException("Mergin two stacks of different size");
+            Console.WriteLine($"Merging two stacks of different size {from.Count} -> {into.Count}");
 
-        for (int i = 0; i < into.Count; i++)
+        for (int i = 0; i < Math.Min(into.Count, from.Count); i++)
         {
             StackValue fromv = from[i];
             StackValue intov = into[i];

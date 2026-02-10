@@ -19,9 +19,6 @@ namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
 
 public class SpawnAnNPCRewriter
 {
-    internal static readonly AssemblyBuilder TypeAssembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("SpawnAnalyzerSpawnAnNPCRewriterTypes"), AssemblyBuilderAccess.Run);
-    internal static readonly ModuleBuilder TypeModule = TypeAssembly.DefineDynamicModule("Types");
-
     public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null)
     {
         MethodInfo method = methodOverride ?? typeof(NPC.Spawner).GetMethod("SpawnAnNPC",
@@ -38,13 +35,13 @@ public class SpawnAnNPCRewriter
 
         DynamicMethodDefinition dmd = new(method);
 
-        List<SimulationNode> nodes = [];
+        List<SimulationNodeInfo> nodes = [];
 
         ILContext il = new(dmd.Definition);
 
-        LocalStateInfo ls = null!;
+        StateType ls = null!;
 
-        il.Invoke((il) => ls = RewriteMethodInternal(il, nodes));
+        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls));
 
         var stack = StackAnalyzer.Analyze(il);
         il.FancyPrintout(stack.instructions);
@@ -61,13 +58,15 @@ public class SpawnAnNPCRewriter
         return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls);
     }
 
-    static LocalStateInfo RewriteMethodInternal(ILContext il, List<SimulationNode> nodes)
+    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType)
     {
         ParameterDefinition entryParam = new("startFromRandomNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
         ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
 
         VariableDefinition stopVar = new(il.Import(typeof(bool)));
         VariableDefinition randomParamVar = new(il.Import(typeof(object)));
+        VariableDefinition stackStateVar = new(il.Import(typeof(object)));
+        VariableDefinition tempIntVar = new(il.Import(typeof(int)));
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
 
@@ -78,7 +77,7 @@ public class SpawnAnNPCRewriter
         ILLabel mainEntryLabel = il.DefineLabel();
         List<ILLabel> entryJumps = [];
 
-        RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, entryJumps);
+        RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, stackStateVar, tempIntVar, entryJumps);
 
         randomRewriter.RewriteRandomCalls(c, stack);
 
@@ -210,7 +209,7 @@ public class SpawnAnNPCRewriter
             c.Remove();
         }
 
-        LocalStateInfo ls = LocalStateInfo.RewriteLocalState(il, contextParam);
+        localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 
         c.Index = 0;
 
@@ -233,8 +232,8 @@ public class SpawnAnNPCRewriter
 
         il.Body.Variables.Add(stopVar);
         il.Body.Variables.Add(randomParamVar);
-
-        return ls;
+        il.Body.Variables.Add(stackStateVar);
+        il.Body.Variables.Add(tempIntVar);
     }
 }
 
@@ -244,14 +243,14 @@ public class SpawnAnNPCRewriteData
 {
     public RewrittenSpawnAnNPC Method;
 
-    public SimulationNode[] Nodes;
+    public SimulationNodeInfo[] Nodes;
 
-    public LocalStateInfo LocalStateInfo;
+    public StateType LocalStateType;
 
-    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNode[] nodes, LocalStateInfo localStateInfo)
+    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, StateType localStateType)
     {
         Method = method;
         Nodes = nodes;
-        LocalStateInfo = localStateInfo;
+        LocalStateType = localStateType;
     }
 }

@@ -18,6 +18,7 @@ public class SpawnSimulationContext
     readonly SpawnAnNPCRewriteData runData;
 
     object? localState;
+    public object? stackState;
     int currentTimeline;
 
     NodeConnection? currentConnection = null;
@@ -60,11 +61,16 @@ public class SpawnSimulationContext
                 bool foundEq = false;
                 for (int i = 0; i < thisNode.timelines.Count; i++)
                 {
-                    if (runData.LocalStateInfo.Equals(localState!, thisNode.timelines[i].localState))
+                    if (runData.LocalStateType.Equals(localState!, thisNode.timelines[i].localState))
                     {
-                        currentTimeline = i;
-                        foundEq = true;
-                        break;
+                        StateType? stackStateType = runData.Nodes[index].stackStateType;
+
+                        if (stackStateType is null || stackStateType.Equals(stackState!, thisNode.timelines[i].stackState!))
+                        {
+                            currentTimeline = i;
+                            foundEq = true;
+                            break;
+                        }
                     }
                 }
                 if (!foundEq)
@@ -80,7 +86,7 @@ public class SpawnSimulationContext
         {
             NodeRollParams rollParams = new();
 
-            runData.Nodes[index].NodeHit(this, param, rollParams, out BranchInfo[] branchInfos);
+            runData.Nodes[index].node.NodeHit(this, param, rollParams, out BranchInfo[] branchInfos);
             var branches = new NodeConnection[branchInfos.Length];
 
             for (int b = 0; b < branches.Length; b++)
@@ -95,10 +101,18 @@ public class SpawnSimulationContext
                 populatedNodes[index] = new();
             }
 
-            var newTimeline = new SimRandomNodeTimeline(branches, rollParams, runData.LocalStateInfo.Clone(localState!));
+            object? stackStateClone = null;
+            StateType? stackStateType = runData.Nodes[index].stackStateType;
+            if (stackStateType is not null)
+            {
+                stackStateClone = stackStateType.Clone(stackState!);
+            }
+
+            var newTimeline = new SimRandomNodeTimeline(branches, rollParams, runData.LocalStateType.Clone(localState!), stackStateClone);
 
             populatedNodes[index]!.timelines.Add(newTimeline);
         }
+        stackState = null;
 
         var node = populatedNodes[index]!;
 
@@ -142,10 +156,18 @@ public class SpawnSimulationContext
         currentConnection = null;
     }
 
+    internal object GetLastNodeStackStateClone()
+    {
+        object state = populatedNodes[currentConnection!.startNode]!.timelines[currentConnection!.startNodeTimeline].stackState!;
+        StateType type = runData.Nodes[currentConnection!.startNode].stackStateType!;
+
+        return type.Clone(state);
+    }
+
     public SimulationResult? Simulate()
     {
         foundInitialNode = null;
-        localState = Activator.CreateInstance(runData.LocalStateInfo.Type);
+        localState = Activator.CreateInstance(runData.LocalStateType.Type);
         currentTimeline = 0;
 
         int? entry = null;
@@ -179,7 +201,7 @@ public class SpawnSimulationContext
                         if (branch.ConnectionType == NodeConnectionType.NotExplored)
                         {
                             // Console.WriteLine($"Start at node {i}, timeline {ti}");
-                            localState = runData.LocalStateInfo.Clone(timeline.localState);
+                            localState = runData.LocalStateType.Clone(timeline.localState);
                             currentTimeline = ti;
                             nextNode = i;
                             break;
@@ -217,6 +239,19 @@ public struct SimulationResult
     public int startNode;
 
     public List<SimRandomNode?> nodes;
+}
+
+public class SimulationNodeInfo
+{
+    public StateType? stackStateType;
+
+    public SimulationNode node;
+
+    public SimulationNodeInfo(StateType? stackStateType, SimulationNode node)
+    {
+        this.stackStateType = stackStateType;
+        this.node = node;
+    }
 }
 
 public abstract class SimulationNode
@@ -301,14 +336,16 @@ public class SimRandomNode
 public class SimRandomNodeTimeline
 {
     public object localState;
+    public object? stackState;
     public NodeRollParams rollParams;
     public NodeConnection[] branches;
 
-    public SimRandomNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState)
+    public SimRandomNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState, object? stackState)
     {
         this.branches = branches;
         this.rollParams = rollParams;
         this.localState = localState;
+        this.stackState = stackState;
     }
 }
 
