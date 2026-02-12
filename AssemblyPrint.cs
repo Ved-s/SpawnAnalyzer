@@ -1,14 +1,17 @@
 using System;
+using System.Linq;
+using System.Reflection;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.Utils;
+using Terraria.GameContent.LeashedEntities;
 
 namespace SpawnAnalyzer;
 
 static class AssemblyPrint
 {
-    public static void Print(Instruction instr)
+    public static void Print(Instruction instr, bool tryResolve = true)
     {
         Console.Write(DnSpyAnsiColors.label);
         Console.Write("IL_");
@@ -80,15 +83,81 @@ static class AssemblyPrint
                 break;
 
             case FieldReference field:
-                Print(field);
+                if (tryResolve)
+                {
+                    FieldInfo? resolvedField = null;
+                    try
+                    {
+                        resolvedField = field.ResolveReflection();
+                    }
+                    catch { }
+                    if (resolvedField is null)
+                    {
+                        Console.Write(DnSpyAnsiColors.comment);
+                        Console.Write(" /* unresolved */");
+                        Print(field);
+                    }
+                    else
+                    {
+                        Print(resolvedField);
+                    }
+                }
+                else
+                {
+                    Print(field);
+                }
                 break;
 
             case MethodReference method:
-                Print(method);
+                if (tryResolve)
+                {
+                    MethodInfo? resolvedMethod = null;
+                    try
+                    {
+                        resolvedMethod = method.ResolveReflection() as MethodInfo;
+                    }
+                    catch { }
+                    if (resolvedMethod is null)
+                    {
+                        Console.Write(DnSpyAnsiColors.comment);
+                        Console.Write(" /* unresolved */");
+                        Print(method);
+                    }
+                    else
+                    {
+                        Print(resolvedMethod);
+                    }
+                }
+                else
+                {
+                    Print(method);
+                }
                 break;
 
             case TypeReference type:
-                Print(type);
+                if (tryResolve)
+                {
+                    Type? resolvedType = null;
+                    try
+                    {
+                        resolvedType = type.ResolveReflection();
+                    }
+                    catch { }
+                    if (resolvedType is null)
+                    {
+                        Console.Write(DnSpyAnsiColors.comment);
+                        Console.Write(" /* unresolved */");
+                        Print(type);
+                    }
+                    else
+                    {
+                        Print(resolvedType);
+                    }
+                }
+                else
+                {
+                    Print(type);
+                }
                 break;
 
             case ParameterDefinition param:
@@ -160,52 +229,29 @@ static class AssemblyPrint
         Console.Write(field.Name);
     }
 
+    public static void Print(FieldInfo field)
+    {
+        Print(field.FieldType);
+        Console.Write(" ");
+        Print(field.DeclaringType, false);
+        Console.Write(DnSpyAnsiColors.punctuation);
+        Console.Write("::");
+        if (field.IsStatic)
+            Console.Write(DnSpyAnsiColors.staticfield);
+        else
+            Console.Write(DnSpyAnsiColors.instancefield);
+        Console.Write(field.Name);
+    }
+
     public static void Print(TypeReference type, bool withPrefix = true)
     {
-        if (type.IsNested)
-        {
-            Print(type.DeclaringType, withPrefix);
-            Console.Write(DnSpyAnsiColors.punctuation);
-            Console.Write("/");
-        }
-        else
-        {
-            if (withPrefix)
-            {
-                Console.Write(DnSpyAnsiColors.keyword);
-                if (type.IsPrimitive || type.FullName == "System.Void")
-                {
+        string? aliasName = null;
 
-                }
-                else if (type.IsValueType)
-                {
-                    Console.Write("valuetype ");
-                }
-                else
-                {
-                    Console.Write("class ");
-                }
-            }
-
-            if (!type.IsPrimitive && type.FullName != "System.Void")
-            {
-                if (type.Namespace != "")
-                {
-                    foreach (string ns in type.Namespace.Split('.'))
-                    {
-                        Console.Write(DnSpyAnsiColors.@namespace);
-                        Console.Write(ns);
-                        Console.Write(DnSpyAnsiColors.punctuation);
-                        Console.Write(".");
-                    }
-                }
-            }
-        }
-
-        if (type.IsPrimitive || type.FullName == "System.Void")
+        if (type.IsPrimitive && type.Namespace == "System" || type.FullName == "System.Void" || type.FullName == "System.Object")
         {
-            string name = type.Name.TrimEnd('&') switch
+            aliasName = type.Name switch
             {
+                nameof(Object) => "object",
                 nameof(Boolean) => "bool",
                 "Void" => "void",
                 nameof(Single) => "float32",
@@ -220,10 +266,50 @@ static class AssemblyPrint
                 nameof(Int64) => "int64",
                 nameof(UIntPtr) => "nuint",
                 nameof(IntPtr) => "nint",
-                _ => type.Name.TrimEnd('&'),
+                _ => null,
             };
+        }
+
+        if (type.IsNested)
+        {
+            Print(type.DeclaringType, withPrefix);
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("/");
+        }
+        else
+        {
+            if (withPrefix && aliasName is null)
+            {
+                Console.Write(DnSpyAnsiColors.keyword);
+                if (type.IsValueType)
+                {
+                    Console.Write("valuetype ");
+                }
+                else
+                {
+                    Console.Write("class ");
+                }
+            }
+
+            if (aliasName is null)
+            {
+                if (type.Namespace != "")
+                {
+                    foreach (string ns in type.Namespace.Split('.'))
+                    {
+                        Console.Write(DnSpyAnsiColors.@namespace);
+                        Console.Write(ns);
+                        Console.Write(DnSpyAnsiColors.punctuation);
+                        Console.Write(".");
+                    }
+                }
+            }
+        }
+
+        if (aliasName is not null)
+        {
             Console.Write(DnSpyAnsiColors.keyword);
-            Console.Write(name);
+            Console.Write(aliasName);
         }
         else
         {
@@ -252,6 +338,144 @@ static class AssemblyPrint
         }
     }
 
+    public static void Print(Type type, bool withPrefix = true)
+    {
+        if (type.IsArray)
+        {
+            Print(type.GetElementType());
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("[");
+            int rank = type.GetArrayRank();
+            for (int i = 1; i < rank; i++)
+            {
+                Console.Write(",");
+            }
+            Console.Write("]");
+            return;
+        }
+
+        if (type.IsByRef)
+        {
+            Print(type.GetElementType());
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("&");
+            return;
+        }
+
+        string? aliasName = null;
+
+        if (type.IsPrimitive && type.Namespace == "System" || type.FullName == "System.Void" || type.FullName == "System.Object")
+        {
+            aliasName = type.Name switch
+            {
+                nameof(Object) => "object",
+                nameof(Boolean) => "bool",
+                "Void" => "void",
+                nameof(Single) => "float32",
+                nameof(Double) => "float64",
+                nameof(Byte) => "uint8",
+                nameof(SByte) => "int8",
+                nameof(UInt16) => "uint16",
+                nameof(Int16) => "int16",
+                nameof(UInt32) => "uint32",
+                nameof(Int32) => "int32",
+                nameof(UInt64) => "uint64",
+                nameof(Int64) => "int64",
+                nameof(UIntPtr) => "nuint",
+                nameof(IntPtr) => "nint",
+                _ => null,
+            };
+        }
+
+        if (type.IsNested)
+        {
+            Print(type.DeclaringType, withPrefix);
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("/");
+        }
+        else
+        {
+            if (withPrefix && aliasName is null)
+            {
+                Console.Write(DnSpyAnsiColors.keyword);
+                if (type.IsValueType)
+                {
+                    Console.Write("valuetype ");
+                }
+                else
+                {
+                    Console.Write("class ");
+                }
+            }
+
+            if (aliasName is null)
+            {
+                if (!string.IsNullOrEmpty(type.Namespace))
+                {
+                    foreach (string ns in type.Namespace.Split('.'))
+                    {
+                        Console.Write(DnSpyAnsiColors.@namespace);
+                        Console.Write(ns);
+                        Console.Write(DnSpyAnsiColors.punctuation);
+                        Console.Write(".");
+                    }
+                }
+            }
+        }
+
+        if (aliasName is not null)
+        {
+            Console.Write(DnSpyAnsiColors.keyword);
+            Console.Write(aliasName);
+        }
+        else
+        {
+            bool staticClass = IsStaticClass(type);
+
+            if (type.IsValueType)
+                Console.Write(DnSpyAnsiColors.valuetype);
+            else if (staticClass)
+                Console.Write(DnSpyAnsiColors.statictype);
+            else
+                Console.Write(DnSpyAnsiColors.type);
+
+            string name = type.Name;
+
+            if (type.IsGenericType)
+            {
+                int generics = type.GetGenericArguments().Length;
+                string genericSuffix = $"`{generics}";
+
+                if (name.EndsWith(genericSuffix))
+                {
+                    name = name.Substring(0, name.Length - genericSuffix.Length);
+                }
+            }
+
+            Console.Write(name);
+        }
+
+        if (type.IsGenericType)
+        {
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("<");
+
+            var generics = type.GetGenericArguments();
+            for (int i = 0; i < generics.Length; i++)
+            {
+                if (i > 0)
+                {
+                    Console.Write(DnSpyAnsiColors.punctuation);
+                    Console.Write(", ");
+                }
+                Print(generics[i]);
+            }
+
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write(">");
+        }
+    }
+
     public static void Print(MethodReference method)
     {
         if (method.HasThis && !method.ExplicitThis)
@@ -263,9 +487,11 @@ static class AssemblyPrint
         Print(method.ReturnType);
         Console.Write(" ");
         if (method.DeclaringType is not null)
+        {
             Print(method.DeclaringType, false);
-        Console.Write(DnSpyAnsiColors.punctuation);
-        Console.Write("::");
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("::");
+        }
         if (method.ExplicitThis)
             Console.Write(DnSpyAnsiColors.extensionmethod);
         else if (method.HasThis)
@@ -274,6 +500,25 @@ static class AssemblyPrint
             Console.Write(DnSpyAnsiColors.staticmethod);
         Console.Write(method.Name);
         Console.Write(DnSpyAnsiColors.reset);
+        if (method.GenericParameters.Count > 0)
+        {
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("<");
+
+            for (int i = 0; i < method.GenericParameters.Count; i++)
+            {
+                if (i > 0)
+                {
+                    Console.Write(DnSpyAnsiColors.punctuation);
+                    Console.Write(", ");
+                }
+                Print(method.GenericParameters[i]);
+            }
+
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write(">");
+
+        }
         Console.Write(DnSpyAnsiColors.punctuation);
         Console.Write("(");
 
@@ -285,6 +530,66 @@ static class AssemblyPrint
                 Console.Write(", ");
             }
             Print(method.Parameters[i].ParameterType);
+        }
+
+        Console.Write(DnSpyAnsiColors.punctuation);
+        Console.Write(")");
+    }
+
+    public static void Print(MethodInfo method)
+    {
+        if (!method.IsStatic)
+        {
+            Console.Write(DnSpyAnsiColors.keyword);
+            Console.Write("instance ");
+        }
+
+        Print(method.ReturnType);
+        Console.Write(" ");
+        if (method.DeclaringType is not null)
+        {
+            Print(method.DeclaringType, false);
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("::");
+        }
+        if (method.IsStatic)
+            Console.Write(DnSpyAnsiColors.staticmethod);
+        else
+            Console.Write(DnSpyAnsiColors.instancemethod);
+        Console.Write(method.Name);
+        Console.Write(DnSpyAnsiColors.reset);
+        if (method.IsGenericMethod)
+        {
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("<");
+
+            var generics = method.GetGenericArguments();
+            for (int i = 0; i < generics.Length; i++)
+            {
+                if (i > 0)
+                {
+                    Console.Write(DnSpyAnsiColors.punctuation);
+                    Console.Write(", ");
+                }
+                Print(generics[i]);
+            }
+
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write(">");
+
+        }
+        Console.Write(DnSpyAnsiColors.punctuation);
+        Console.Write("(");
+
+        ParameterInfo[] parameters = method.GetParameters();
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            if (i > 0)
+            {
+                Console.Write(DnSpyAnsiColors.punctuation);
+                Console.Write(", ");
+            }
+            Print(parameters[i].ParameterType);
         }
 
         Console.Write(DnSpyAnsiColors.punctuation);

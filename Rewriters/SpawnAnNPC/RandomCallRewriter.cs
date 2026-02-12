@@ -305,7 +305,7 @@ class RandomCallRewriter
                 break;
         }
         c.Emit(OpCodes.Ldloca, stopVar);
-        c.Emit<SpawnSimulationContext>(OpCodes.Call, "RandomNodeHit");
+        c.Emit<SpawnSimulationContext>(OpCodes.Call, "NodeHit");
         c.Emit(OpCodes.Ldloc, stopVar);
         c.Emit(OpCodes.Brfalse, afterStopHandler);
 

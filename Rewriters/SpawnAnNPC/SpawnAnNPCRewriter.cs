@@ -60,7 +60,7 @@ public class SpawnAnNPCRewriter
 
     static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType)
     {
-        ParameterDefinition entryParam = new("startFromRandomNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
+        ParameterDefinition entryParam = new("startFromNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
         ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
 
         VariableDefinition stopVar = new(il.Import(typeof(bool)));

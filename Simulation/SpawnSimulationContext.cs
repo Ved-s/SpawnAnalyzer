@@ -41,7 +41,7 @@ public class SpawnSimulationContext
         this.xRange = xRange;
     }
 
-    internal int RandomNodeHit(int index, object param, out bool stop)
+    internal int NodeHit(int index, object param, out bool stop)
     {
         foundInitialNode ??= index;
 
