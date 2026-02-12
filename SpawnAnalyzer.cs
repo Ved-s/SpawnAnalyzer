@@ -43,8 +43,9 @@ public class SpawnAnalyzer
         MainDrawMouseOverHook = new Hook(typeof(Main).GetMethod("DrawMouseOver", (BindingFlags)(-1)), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(typeof(Main).GetMethod("SetupDrawInterfaceLayers", (BindingFlags)(-1)), On_Main_SetupDrawInterfaceLayers);
 
+
         Stopwatch sw = Stopwatch.StartNew();
-        var d = SpawnAnNPCRewriter.RewriteMethod(TestMethods.GetTestMethodInfo(7));
+        var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);
         sw.Stop();
         Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
 

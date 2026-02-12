@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using Terraria;
 using Terraria.GameContent.Events;
 
@@ -248,5 +249,20 @@ public static class TestMethods
         }
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 46, 0, 0f, 0f, 0f, 0f, 255);
         return;
+    }
+
+    public static void TestMethod9(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
+        if (Main.rand.Next(100) < 30)
+        {
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
+            return;
+        }
+
+        if (Main.rand.Next(100) >= 30)
+        {
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
+            return;
+        }
     }
 }

@@ -31,6 +31,68 @@ public class StackAnalyzer
         OpCodes.Xor,
     ];
 
+    static Dictionary<OpCode, Type> LdelemSimpleOpcodes = new() {
+        { OpCodes.Ldelem_I,         typeof(nint)   },
+        { OpCodes.Ldelem_I1,        typeof(sbyte)  },
+        { OpCodes.Ldelem_I2,        typeof(short)  },
+        { OpCodes.Ldelem_I4,        typeof(int)    },
+        { OpCodes.Ldelem_I8,        typeof(long)   },
+        { OpCodes.Ldelem_R4,        typeof(float)  },
+        { OpCodes.Ldelem_R8,        typeof(double) },
+        { OpCodes.Ldelem_U1,        typeof(byte)   },
+        { OpCodes.Ldelem_U2,        typeof(ushort) },
+        { OpCodes.Ldelem_U4,        typeof(uint)   },
+    };
+
+    static Dictionary<OpCode, Type> ConversionOpcodes = new() {
+        { OpCodes.Conv_I,         typeof(nint)  },
+        { OpCodes.Conv_I1,        typeof(sbyte) },
+        { OpCodes.Conv_I2,        typeof(short) },
+        { OpCodes.Conv_I4,        typeof(int)   },
+        { OpCodes.Conv_I8,        typeof(long)  },
+        { OpCodes.Conv_Ovf_I,     typeof(nint)  },
+        { OpCodes.Conv_Ovf_I_Un,  typeof(nint)  },
+        { OpCodes.Conv_Ovf_I1,    typeof(sbyte) },
+        { OpCodes.Conv_Ovf_I1_Un, typeof(sbyte) },
+        { OpCodes.Conv_Ovf_I2,    typeof(short) },
+        { OpCodes.Conv_Ovf_I2_Un, typeof(short) },
+        { OpCodes.Conv_Ovf_I4,    typeof(int)   },
+        { OpCodes.Conv_Ovf_I4_Un, typeof(int)   },
+        { OpCodes.Conv_Ovf_I8,    typeof(long)  },
+        { OpCodes.Conv_Ovf_I8_Un, typeof(long)  },
+
+        { OpCodes.Conv_U,         typeof(nuint)  },
+        { OpCodes.Conv_U1,        typeof(byte)   },
+        { OpCodes.Conv_U2,        typeof(ushort) },
+        { OpCodes.Conv_U4,        typeof(uint)   },
+        { OpCodes.Conv_U8,        typeof(ulong)  },
+        { OpCodes.Conv_Ovf_U,     typeof(nuint)  },
+        { OpCodes.Conv_Ovf_U_Un,  typeof(nuint)  },
+        { OpCodes.Conv_Ovf_U1,    typeof(byte)   },
+        { OpCodes.Conv_Ovf_U1_Un, typeof(byte)   },
+        { OpCodes.Conv_Ovf_U2,    typeof(ushort) },
+        { OpCodes.Conv_Ovf_U2_Un, typeof(ushort) },
+        { OpCodes.Conv_Ovf_U4,    typeof(uint)   },
+        { OpCodes.Conv_Ovf_U4_Un, typeof(uint)   },
+        { OpCodes.Conv_Ovf_U8,    typeof(ulong)  },
+        { OpCodes.Conv_Ovf_U8_Un, typeof(ulong)  },
+
+        { OpCodes.Conv_R_Un,      typeof(float)  },
+        { OpCodes.Conv_R4,        typeof(float)  },
+        { OpCodes.Conv_R8,        typeof(double) },
+    };
+
+
+
+    static OpCode[] ComparisonOpcodes = [
+        OpCodes.Ceq,  
+        OpCodes.Cgt,  
+        OpCodes.Cgt_Un,  
+        OpCodes.Clt,  
+        OpCodes.Clt_Un,  
+    ];
+
+
     public static StackAnalysis Analyze(ILContext il)
     {
         List<bool> processedInstructions = new();
@@ -86,6 +148,7 @@ public class StackAnalyzer
                     break;
 
                 case StackBehaviour.Popref_pop1:
+                case StackBehaviour.Popref_popi:
                 case StackBehaviour.Pop1_pop1:
                     if (info.outValues.Count < 2)
                         throw new InvalidProgramException($"Not enough values on the stack for {instr}");
@@ -309,6 +372,18 @@ public class StackAnalyzer
                     else if (instr.MatchBox(out _))
                     {
                         value = new(null, typeof(object), SimpleType.Object);
+                    }
+                    else if (ConversionOpcodes.TryGetValue(opCode, out Type convertedType))
+                    {
+                        value = new(null, convertedType, SimpleTypeFromSystemType(convertedType));
+                    }
+                    else if (ComparisonOpcodes.Contains(opCode))
+                    {
+                        value = new(null, typeof(byte), SimpleType.Integer);
+                    }
+                    else if (LdelemSimpleOpcodes.TryGetValue(opCode, out Type valueType))
+                    {
+                        value = new(null, valueType, SimpleTypeFromSystemType(valueType));
                     }
                     else
                     {

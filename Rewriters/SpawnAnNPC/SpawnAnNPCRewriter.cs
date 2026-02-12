@@ -19,7 +19,7 @@ namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
 
 public class SpawnAnNPCRewriter
 {
-    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null)
+    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true)
     {
         MethodInfo method = methodOverride ?? typeof(NPC.Spawner).GetMethod("SpawnAnNPC",
             BindingFlags.Instance | BindingFlags.Public, null,
@@ -41,10 +41,10 @@ public class SpawnAnNPCRewriter
 
         StateType ls = null!;
 
-        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls));
+        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns));
 
-        var stack = StackAnalyzer.Analyze(il);
-        il.FancyPrintout(stack.instructions);
+        // var stack = StackAnalyzer.Analyze(il);
+        // il.FancyPrintout(stack.instructions);
 
         Console.WriteLine("Rewrite OK");
         Console.WriteLine();
@@ -58,7 +58,7 @@ public class SpawnAnNPCRewriter
         return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls);
     }
 
-    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType)
+    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType, bool allowUnknownPatterns)
     {
         ParameterDefinition entryParam = new("startFromNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
         ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
@@ -70,8 +70,6 @@ public class SpawnAnNPCRewriter
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
 
-        il.FancyPrintout(stack.instructions);
-
         ILCursor c = new(il);
 
         ILLabel mainEntryLabel = il.DefineLabel();
@@ -79,7 +77,7 @@ public class SpawnAnNPCRewriter
 
         RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, stackStateVar, tempIntVar, entryJumps);
 
-        randomRewriter.RewriteRandomCalls(c, stack);
+        randomRewriter.RewriteRandomCalls(c, stack, allowUnknownPatterns);
 
         c.Index = 0;
 
@@ -157,6 +155,18 @@ public class SpawnAnNPCRewriter
             ))
             {
                 c.RemoveRange(3);
+            }
+            else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
+                x => x.MatchDup(),
+                x => x.MatchLdfld<NPC>("timeLeft"),
+                x => x.MatchLdcI4(out _),
+                x => x.MatchMul(),
+                x => x.MatchStfld<NPC>("timeLeft"),
+                x => x.MatchRet()
+            ))
+            {
+                // TODO: register somewhere that spawned NPC has more time
+                c.RemoveRange(5);
             }
             else
             {

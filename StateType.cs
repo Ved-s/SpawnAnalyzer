@@ -19,12 +19,16 @@ public class StateType
 
     static readonly Dictionary<Type, MethodInfo> EqMethods = new()
     {
-        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListEq), (BindingFlags)(-1))}
+        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListEq), (BindingFlags)(-1))},
+        {typeof(int[]), typeof(StateType).GetMethod(nameof(IntArray1DEq), (BindingFlags)(-1))},
+        {typeof(int[,]), typeof(StateType).GetMethod(nameof(IntArray2DEq), (BindingFlags)(-1))},
     };
 
     static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
     {
-        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListClone), (BindingFlags)(-1))}
+        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListClone), (BindingFlags)(-1))},
+        {typeof(int[]), typeof(StateType).GetMethod(nameof(IntArray1DClone), (BindingFlags)(-1))},
+        {typeof(int[,]), typeof(StateType).GetMethod(nameof(IntArray2DClone), (BindingFlags)(-1))},
     };
 
     public Type Type;
@@ -211,13 +215,72 @@ public class StateType
 
     static List<int> IntListClone(List<int> l)
     {
-        List<int> clone = new();
-        clone.Capacity = l.Count;
+        return new(l);
+    }
 
-        foreach (int v in l)
+    static bool IntArray1DEq(int[] a, int[] b)
+    {
+        if (a.Length != b.Length)
         {
-            clone.Add(v);
+            return false;
         }
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static int[] IntArray1DClone(int[] a)
+    {
+        int[] clone = new int[a.Length];
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            clone[i] = a[i];
+        }
+
+        return clone;
+    }
+
+    static bool IntArray2DEq(int[,] a, int[,] b)
+    {
+        int l0 = a.GetLength(0);
+        int l1 = a.GetLength(1);
+        if (l0 != b.GetLength(0) || l1 != b.GetLength(1))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < l0; i++)
+            for (int j = 0; j < l1; j++)
+            {
+                if (a[i, j] != b[i, j])
+                {
+                    return false;
+                }
+            }
+
+        return true;
+    }
+
+    static int[,] IntArray2DClone(int[,] a)
+    {
+        int l0 = a.GetLength(0);
+        int l1 = a.GetLength(1);
+
+        int[,] clone = new int[l1, l1];
+
+        for (int i = 0; i < l0; i++)
+            for (int j = 0; j < l1; j++)
+            {
+                clone[i, j] = a[i, j];
+            }
 
         return clone;
     }
