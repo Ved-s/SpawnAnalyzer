@@ -495,7 +495,7 @@ public class StackAnalyzer
 
                     if (populatedInstructionInputs[index])
                     {
-                        MergeStackValues(infos[index].inValues, info.outValues, infos);
+                        MergeStackValues(infos[index].inValues, info.outValues, infos, nextInstr);
                     }
                     else
                     {
@@ -513,7 +513,7 @@ public class StackAnalyzer
                 case FlowControl.Next:
                     if (populatedInstructionInputs[i + 1])
                     {
-                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos);
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i+1].instruction);
                     }
                     else
                     {
@@ -529,7 +529,7 @@ public class StackAnalyzer
 
                     if (populatedInstructionInputs[i + 1])
                     {
-                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos);
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i+1].instruction);
                     }
                     else
                     {
@@ -574,7 +574,7 @@ public class StackAnalyzer
 
                             if (populatedInstructionInputs[index])
                             {
-                                MergeStackValues(infos[index].inValues, info.outValues, infos);
+                                MergeStackValues(infos[index].inValues, info.outValues, infos, infos[index].instruction);
                             }
                             else
                             {
@@ -608,10 +608,10 @@ public class StackAnalyzer
         return new(infos);
     }
 
-    static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos)
+    static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos, Instruction at)
     {
         if (into.Count != from.Count)
-            Console.WriteLine($"Merging two stacks of different size {from.Count} -> {into.Count}");
+            Console.WriteLine($"Merging two stacks of different size {from.Count} -> {into.Count} at IL_{at.Offset:x4}");
 
         for (int i = 0; i < Math.Min(into.Count, from.Count); i++)
         {

@@ -41,10 +41,20 @@ public class SpawnAnNPCRewriter
 
         StateType ls = null!;
 
-        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns));
+        int nodeSwitchIndex = 0;
 
-        // var stack = StackAnalyzer.Analyze(il);
-        // il.FancyPrintout(stack.instructions);
+        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex));
+
+        if (il.Instrs[nodeSwitchIndex].Operand is Instruction[] nodeInstrs)
+        {
+            for (int i = 0; i < nodeInstrs.Length; i++)
+            {
+                nodes[i].Offset = nodeInstrs[i].Offset;
+            }
+        }
+
+        var stack = StackAnalyzer.Analyze(il);
+        il.FancyPrintout(stack.instructions);
 
         Console.WriteLine("Rewrite OK");
         Console.WriteLine();
@@ -58,7 +68,7 @@ public class SpawnAnNPCRewriter
         return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls);
     }
 
-    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType, bool allowUnknownPatterns)
+    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType, bool allowUnknownPatterns, out int nodeSwitchIndex)
     {
         ParameterDefinition entryParam = new("startFromNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
         ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
@@ -91,6 +101,9 @@ public class SpawnAnNPCRewriter
 
         c.Index = 0;
 
+        ulong unknownSpawns = 0;
+        ulong knownSpawns = 0;
+
         while (c.TryGotoNext(
             x => x.MatchCallOrCallvirt<NPC.Spawner>("SpawnNPC")
         ))
@@ -109,7 +122,7 @@ public class SpawnAnNPCRewriter
 
             if (!thisLoadInstr.MatchLdarg(0))
                 throw new InvalidOperationException($"Invalid this param value source (at IL_{thisLoadInstr.Offset:x4}) for random call at IL_{c.Next.Offset:x4}");
-            
+
             thisLoadInstr.OpCode = OpCodes.Ldarg;
             thisLoadInstr.Operand = contextParam;
 
@@ -129,63 +142,64 @@ public class SpawnAnNPCRewriter
             }
             else
             {
-                Console.WriteLine($"\x1b[1mUnsupported spawn start at IL_{c.Next!.Offset:x4}:\x1b[0m");
-
-                for (int i = Math.Max(0, c.Index - 10); i <= c.Index; i++)
-                {
-                    AssemblyPrint.Print(c.Instrs[i]);
-                    Console.WriteLine();
-                }
-
-                Environment.Exit(1);
+                // SpawnAnalyzer.ReportUnknownPattern("spawn start", c.Context, c.Index, 10, 5);
+                // unknownSpawns++;
+                // continue;
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Remove();
+                c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHit");
             }
 
-            if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
-                x => x.MatchPop(),
-                x => x.MatchRet()
-            ))
+            if (c.Next.MatchPop())
             {
                 c.Remove();
-            }
-            else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
-                x => x.MatchPop(),
-                x => x.MatchLdloc(out _),
-                x => x.MatchCallOrCallvirt(out MethodReference? mr) && mr.Name == "Clear",
-                x => x.MatchRet()
-            ))
-            {
-                c.RemoveRange(3);
             }
             else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
                 x => x.MatchDup(),
                 x => x.MatchLdfld<NPC>("timeLeft"),
                 x => x.MatchLdcI4(out _),
                 x => x.MatchMul(),
-                x => x.MatchStfld<NPC>("timeLeft"),
-                x => x.MatchRet()
+                x => x.MatchStfld<NPC>("timeLeft")
             ))
             {
                 // TODO: register somewhere that spawned NPC has more time
                 c.RemoveRange(5);
             }
+            else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
+                x => x.MatchLdcI4(out _),
+                x => x.MatchCallOrCallvirt<NPC>("TargetClosest")
+            ))
+            {
+                c.RemoveRange(2);
+            }
             else
             {
-                Console.WriteLine($"\x1b[1mUnsupported spawn end at IL_{c.Next!.Offset:x4}:\x1b[0m");
-
-                for (int i = c.Index; i < Math.Min(c.Index + 10, c.Instrs.Count); i++)
-                {
-                    AssemblyPrint.Print(c.Instrs[i]);
-                    Console.WriteLine();
-                }
-
-                Environment.Exit(1);
+                SpawnAnalyzer.ReportUnknownPattern("spawn end", c.Context, c.Index, 5, 10);
+                unknownSpawns++;
+                continue;
             }
+
+            knownSpawns++;
+        }
+
+        if (unknownSpawns > 0)
+        {
+            ulong totalSpawns = knownSpawns + unknownSpawns;
+            double done = (double)knownSpawns / totalSpawns;
+            Console.WriteLine($"{done * 100:0.0}% ({knownSpawns}/{totalSpawns}) of SpawnNPC calls patched");
+            Environment.Exit(1);
         }
 
         c.Index = 0;
 
         int arg = 0;
         while (c.TryGotoNext(
+            MoveType.AfterLabel,
             x => x.MatchLdarg(out arg)
         ))
         {
@@ -206,13 +220,19 @@ public class SpawnAnNPCRewriter
 
             if (field is null)
             {
-                throw new NotImplementedException();
+                if (arg == 5)
+                {
+                    c.Next!.OpCode = OpCodes.Ldc_I4_0;
+                    c.Next!.Operand = null;
+                    continue;
+                }
+                else 
+                    throw new NotImplementedException($"ldarg {arg} at IL_{c.Next!.Offset:x4}");
             }
 
             Instruction oldInstruction = c.Next!;
-            c.Emit(OpCodes.Ldarg, contextParam);
-            il.RetargetLabels(oldInstruction, c.Prev);
 
+            c.Emit(OpCodes.Ldarg, contextParam);
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, field);
 
             c.Next = oldInstruction;
@@ -232,6 +252,8 @@ public class SpawnAnNPCRewriter
 
         c.Emit(OpCodes.Ldarga, entryParam);
         c.Emit<int?>(OpCodes.Call, "get_Value");
+        nodeSwitchIndex = c.Index;
+
         c.Emit(OpCodes.Switch, entryJumps.ToArray());
         c.Emit(OpCodes.Ret);
         c.MarkLabel(mainEntryLabel);

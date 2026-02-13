@@ -122,7 +122,7 @@ class RandomCallRewriter
             ValueHandler? valueHandler = TryCreateValueHandler(c, stackInfo.outValues[stackInfo.outValues.Count - 1], allowUnknownPatterns);
             if (valueHandler is null)
             {
-                ReportInvalid("random call value handler", c.Context, c.Instrs.IndexOf(instr) + 1, 2, 10);
+                SpawnAnalyzer.ReportUnknownPattern("random call value handler", c.Context, c.Instrs.IndexOf(instr) + 1, 2, 10);
                 c.Goto(c.Instrs.IndexOf(instr) + 1);
                 unknownPatterns++;
                 continue;
@@ -138,7 +138,7 @@ class RandomCallRewriter
                 SimulationNode? node = TryBuildSingleIntSimulationNode(method, param, valueHandler.Value);
                 if (node is null)
                 {
-                    ReportInvalid("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
+                    SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
                     c.Goto(c.Instrs.IndexOf(instr) + 1);
                     unknownPatterns++;
                     continue;
@@ -171,7 +171,7 @@ class RandomCallRewriter
                 SimulationNode? node = TryBuildDoubleIntSimulationNode(method, param, valueHandler.Value);
                 if (node is null)
                 {
-                    ReportInvalid("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
+                    SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
                     c.Goto(c.Instrs.IndexOf(instr) + 1);
                     unknownPatterns++;
                     continue;
@@ -197,7 +197,7 @@ class RandomCallRewriter
 
                 if (!SelectRandomNode.SupportsArrayElementType(valueType))
                 {
-                    ReportInvalid("SelectRandom value type", c.Context, c.Instrs.IndexOf(instr), 10, 5);
+                    SpawnAnalyzer.ReportUnknownPattern("SelectRandom value type", c.Context, c.Instrs.IndexOf(instr), 10, 5);
                     c.Goto(c.Instrs.IndexOf(instr) + 1);
                     unknownPatterns++;
                     continue;
@@ -209,7 +209,7 @@ class RandomCallRewriter
                 SimulationNode? node = SelectRandomNode.Build(valueHandler.Value);
                 if (node is null)
                 {
-                    ReportInvalid("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
+                    SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
                     c.Goto(c.Instrs.IndexOf(instr) + 1);
                     unknownPatterns++;
                     continue;
@@ -229,7 +229,7 @@ class RandomCallRewriter
                 continue;
             }
 
-            ReportInvalid("random call", c.Context, c.Instrs.IndexOf(instr), 10, 5);
+            SpawnAnalyzer.ReportUnknownPattern("random call", c.Context, c.Instrs.IndexOf(instr), 10, 5);
             c.Goto(c.Instrs.IndexOf(instr) + 1);
             unknownPatterns++;
             continue;
@@ -372,7 +372,9 @@ class RandomCallRewriter
     private ParamProvider<int> CreateSingleIntProvider(ILCursor c)
     {
         int staticValue = 0;
-        if (c.Index > 0 && SpawnAnalyzer.MatchInstructions(
+        if (c.IncomingLabels.Count() == 0 
+         && c.Index > 0 
+         && SpawnAnalyzer.MatchInstructions(
             c.Context, c.Index, out _,
             x => x.MatchLdcI4(out staticValue)
         ))
@@ -382,7 +384,7 @@ class RandomCallRewriter
             return new StaticParamProvider<int>(staticValue);
         }
 
-        c.Index += 1;
+        c.Goto(c.Index + 1, MoveType.AfterLabel);
 
         c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
         c.Emit(OpCodes.Stloc, nodeParamVar);
@@ -504,6 +506,14 @@ class RandomCallRewriter
         {
             return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuck);
         }
+        if (method.Name == "RollBadLuckExtreme")
+        {
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.BadLuckExtreme);
+        }
+        if (method.Name == "RollOnlyBadLuckExtreme")
+        {
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuckExtreme);
+        }
         if (method.Name == "RollDragonflyType")
         {
             return new RandomDragonflyTypeNode(param);
@@ -518,21 +528,6 @@ class RandomCallRewriter
             return TwoParamRandomNextNode.Build(param, valHandler);
         }
         return null;
-    }
-
-    private void ReportInvalid(string type, ILContext c, int index, int showBefore, int showAfter)
-    {
-        Console.WriteLine($"\n\x1b[1mUnsupported {type} at IL_{c.Instrs[index].Offset:x4}:\x1b[0m");
-
-        for (int i = Math.Max(0, index - showBefore); i <= Math.Min(index + showAfter, c.Instrs.Count); i++)
-        {
-            if (i == index)
-                Console.Write("-> ");
-            else
-                Console.Write("   ");
-            AssemblyPrint.Print(c.Instrs[i]);
-            Console.WriteLine();
-        }
     }
 
     private static object PackTwoIntTupleBoxed(int a, int b)
@@ -701,12 +696,6 @@ enum ValueHandlerType
     AllUnique,
 }
 
-// abstract class ValueHandler
-// {
-//     public abstract bool AllValuesAreUnique { get; }
-//     public abstract ValueRange[] GetExpectedValueRanges();
-// }
-
 class StaticParamProvider<T> : ParamProvider<T>
 {
     readonly T value;
@@ -734,18 +723,7 @@ class RuntimeParamVarCastParamProvider<T> : ParamProvider<T>
     }
 }
 
-// class SimpleBranchValueHandler : ValueHandler
-// {
-//     public override bool AllValuesAreUnique => false;
-
-//     public override ValueRange[] GetExpectedValueRanges()
-//     {
-//         return [
-//             new(0, 1),
-//             new(1, null)
-//         ];
-//     }
-// }
+// TODO: Eliminate 0% branches, Merge branches with same return value
 
 class OneParamRandomNextNode : SimulationNode
 {
@@ -775,29 +753,38 @@ class OneParamRandomNextNode : SimulationNode
         return new(param, handler, luckDependance);
     }
 
-    public static float LuckChanceMod(float chance, LuckDependance dep, float luck, NodeRollParams rollParams)
+    public static float? LuckChanceMod(float chance, LuckDependance dep, float luck, NodeRollParams rollParams)
     {
         switch (dep)
         {
             case LuckDependance.None:
-                break;
-            
-            case LuckDependance.GoodLuck: 
+                return chance;
+
+            case LuckDependance.GoodLuck:
                 rollParams.dependsOnLuck = true;
-                chance *= SpawnAnalyzer.PredictLuckChanceMod(luck);
-                break;
+                return chance * SpawnAnalyzer.PredictLuckChanceMod(luck);
 
             case LuckDependance.BadLuck:
                 rollParams.dependsOnLuck = true;
-                chance *= SpawnAnalyzer.PredictLuckChanceMod(-luck);
-                break;
+                return chance * SpawnAnalyzer.PredictLuckChanceMod(-luck);
 
             case LuckDependance.OnlyBadLuck:
                 rollParams.dependsOnLuck = true;
                 if (luck < 0)
-                    chance *= SpawnAnalyzer.PredictLuckChanceMod(-luck);
-                break;
-        };
+                    return chance * SpawnAnalyzer.PredictLuckChanceMod(-luck);
+                return chance;
+
+            case LuckDependance.BadLuckExtreme:
+                rollParams.dependsOnLuck = true;
+                return chance * SpawnAnalyzer.PredictBadLuckExtremeChanceMod(luck);
+
+            case LuckDependance.OnlyBadLuckExtreme:
+                rollParams.dependsOnLuck = true;
+                if (luck >= 0)
+                    return null;
+                return chance * SpawnAnalyzer.PredictBadLuckExtremeChanceMod(luck);
+        }
+        ;
 
         return chance;
     }
@@ -812,36 +799,60 @@ class OneParamRandomNextNode : SimulationNode
 
                 float hitChance = 1f / value;
 
-                hitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
+                float? tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
 
-                branches = [
-                    new BranchInfo() {
-                        chance = hitChance,
-                        returnValue = 0,
-                    },
-                    new BranchInfo() {
-                        chance = 1f - hitChance,
-                        returnValue = 1,
-                    },
-                ];
+                if (tryhitChance is null)
+                {
+                    branches = [
+                        new BranchInfo() {
+                            chance = 1f,
+                            returnValue = -1,
+                        },
+                    ];
+                }
+                else
+                {
+                    branches = [
+                        new BranchInfo() {
+                            chance = tryhitChance.Value,
+                            returnValue = 0,
+                        },
+                        new BranchInfo() {
+                            chance = 1f - tryhitChance.Value,
+                            returnValue = 1,
+                        },
+                    ];
+                }
                 return;
 
             case ValueHandlerType.LeValueOrGtValue:
 
                 hitChance = (float)(handler.value + 1) / value;
 
-                hitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
+                tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
 
-                branches = [
-                    new BranchInfo() {
-                        chance = hitChance,
-                        returnValue = handler.value,
-                    },
-                    new BranchInfo() {
-                        chance = 1f - hitChance,
-                        returnValue = handler.value+1,
-                    },
-                ];
+                if (tryhitChance is null)
+                {
+                    branches = [
+                        new BranchInfo() {
+                            chance = 1f,
+                            returnValue = -1,
+                        },
+                    ];
+                }
+                else
+                {
+                    branches = [
+                        new BranchInfo() {
+                            chance = tryhitChance.Value,
+                            returnValue = handler.value,
+                        },
+                        new BranchInfo() {
+                            chance = 1f - tryhitChance.Value,
+                            returnValue = handler.value+1,
+                        },
+                    ];
+                }
                 return;
 
             case ValueHandlerType.AllUnique:
@@ -1029,6 +1040,8 @@ enum LuckDependance
     GoodLuck,
     BadLuck,
     OnlyBadLuck,
+    BadLuckExtreme,
+    OnlyBadLuckExtreme,
 }
 
 enum EqualityType

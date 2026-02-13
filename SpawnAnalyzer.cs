@@ -51,14 +51,44 @@ public class SpawnAnalyzer
 
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
 
-        var ctx = new SpawnSimulationContext(d, spawner, 100, 200, 0, false);
+        int x = 100;
+        int y = 100;
+        int tileType = TileID.Grass;
+
+        var ctx = new SpawnSimulationContext(d, spawner, x, y, tileType, false);
+
+        Main.tile = new Tile[500, 500];
+
+        for (int i = 0; i < Main.tile.GetLength(0); i++)
+        {
+            for (int j = 0; j < Main.tile.GetLength(1); j++)
+            {
+                Main.tile[i, j] = new();
+            }
+        }
+
+        Main.tile[x, y].type = (ushort)tileType;
+
+        Main.npc = new NPC[200];
+        for (int i = 0; i < Main.npc.Length; i++)
+        {
+            Main.npc[i] = new();
+        }
+
+        Main.ActiveWorldFileData = new();
+        Main.ActiveWorldFileData.WorldId = 1;
+        NPC.SetWorldSpecificMonstersByWorldID();
+
+        spawner.dayTime = true;
+        spawner.surfaceSpawn = true;
+
 
         sw.Restart();
         var data = ctx.Simulate() ?? throw new NullReferenceException();
         sw.Stop();
 
         Console.WriteLine($"Simulated in {sw.ElapsedMilliseconds}ms, entry node {data.startNode}, visited {data.nodes.Count(n => n is not null)}/{d.Nodes.Length} nodes");
-        
+
         for (int i = 0; i < data.nodes.Count; i++)
         {
             var node = data.nodes[i];
@@ -67,13 +97,14 @@ public class SpawnAnalyzer
                 continue;
             }
 
+            int offset = d.Nodes[i].Offset;
             if (data.startNode == i)
             {
-                Console.WriteLine($"Node {i} (start): ");
+                Console.WriteLine($"Node {i} [IL_{offset:x4}] (start): ");
             }
             else
             {
-                Console.WriteLine($"Node {i}: ");
+                Console.WriteLine($"Node {i} [IL_{offset:x4}]: ");
             }
 
             for (int t = 0; t < node.timelines.Count; t++)
@@ -83,31 +114,52 @@ public class SpawnAnalyzer
                 var timeline = node.timelines[t];
                 foreach (var branch in timeline.branches)
                 {
-                    Console.Write($"   [{branch.info.chance * 100:.0}%] -> ");
+                    string ps = $"   [{branch.info.chance * 100:.0}%] -> ";
+                    Console.Write(ps);
 
-                    switch (branch.ConnectionType)
+                    bool firstline = true;
+
+                    if (branch.spawns is not null)
                     {
-                        case NodeConnectionType.NotExplored:
-                            Console.WriteLine($"Unexplored");
-                            break;
-
-                        case NodeConnectionType.NoConnection:
-                            Console.WriteLine($"Nothing");
-                            break;
-
-                        case NodeConnectionType.RandomNode:
-                            Console.WriteLine($"Node {branch.nextRandom!.node}/{branch.nextRandom!.timeline}");
-                            break;
-
-                        case NodeConnectionType.SpawnNode:
-                            var spawn = branch.nextSpawn!;
-                            Console.WriteLine($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
-                            break;
+                        foreach (var spawn in branch.spawns)
+                        {
+                            if (!firstline)
+                            {
+                                Console.WriteLine(",");
+                                for (int j = 0; j < ps.Length; j++)
+                                {
+                                    Console.Write(' ');
+                                }
+                            }
+                            firstline = false;
+                            Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
+                        }
                     }
+
+                    if (branch.nextNode is not null)
+                    {
+                        if (!firstline)
+                        {
+                            Console.WriteLine(",");
+                            for (int j = 0; j < ps.Length; j++)
+                            {
+                                Console.Write(' ');
+                            }
+                        }
+                        firstline = false;
+
+                        Console.Write($"Node {branch.nextNode!.node}/{branch.nextNode!.timeline}");
+                    }
+
+                    if (firstline)
+                    {
+                        Console.Write($"Nothing");
+                    }
+                    Console.WriteLine();
                 }
             }
         }
-        
+
         Dictionary<int, (NodeRollParams, float)> spawns = new();
 
         // (node, timeline, branch, chance)
@@ -132,10 +184,25 @@ public class SpawnAnalyzer
             var timelinev = data.nodes[node]!.timelines[timeline];
             var branchv = timelinev.branches[branch];
 
+            (NodeRollParams, float) oldvalue;
+            if (branchv.spawns is not null)
+            {
+                foreach (var spawn in branchv.spawns)
+                {
+                    if (!spawns.TryGetValue(spawn.npcId, out oldvalue))
+                    {
+                        oldvalue = (new(), 0);
+                    }
+
+                    MergeParams(oldvalue.Item1, timelinev.rollParams);
+                    spawns[spawn.npcId] = (oldvalue.Item1, percent + oldvalue.Item2);
+                }
+            }
+
             switch (branchv.ConnectionType)
             {
                 case NodeConnectionType.RandomNode:
-                    var next = branchv.nextRandom!;
+                    var next = branchv.nextNode!;
                     var nextTimeline = data.nodes[next.node]!.timelines[next.timeline];
                     for (int i = 0; i < nextTimeline.branches.Length; i++)
                     {
@@ -144,23 +211,16 @@ public class SpawnAnalyzer
                     break;
 
                 case NodeConnectionType.SpawnNode:
-                    if (!spawns.TryGetValue(branchv.nextSpawn!.npcId, out (NodeRollParams, float) oldvalue))
-                    {
-                        oldvalue = (new(), 0);
-                    }
-
-                    MergeParams(oldvalue.Item1, timelinev.rollParams);
-
-                    spawns[branchv.nextSpawn!.npcId] = (oldvalue.Item1, percent + oldvalue.Item2);
                     break;
 
                 case NodeConnectionType.NoConnection:
-                    if (!spawns.TryGetValue(-1, out oldvalue))
+                    Console.WriteLine($"NoConnection at node {node} timeline {timeline} branch {branch} percent {percent*100:0.0}");
+                    if (!spawns.TryGetValue(int.MinValue, out oldvalue))
                     {
                         oldvalue = (new(), 0);
                     }
 
-                    spawns[-1] = (oldvalue.Item1, percent + oldvalue.Item2);
+                    spawns[int.MinValue] = (oldvalue.Item1, percent + oldvalue.Item2);
                     break;
             }
         }
@@ -169,10 +229,11 @@ public class SpawnAnalyzer
 
         Console.WriteLine("Calculated spawns:");
         float chancesAdd = 0;
-        foreach (KeyValuePair<int, (NodeRollParams, float)> kvp in spawns)
+
+        foreach (KeyValuePair<int, (NodeRollParams, float)> kvp in spawns.OrderBy(kvp => kvp.Value.Item2))
         {
             chancesAdd += kvp.Value.Item2;
-            if (kvp.Key < 0)
+            if (kvp.Key == int.MinValue)
                 Console.WriteLine($" Nothing: {kvp.Value.Item2 * 100:.000}%");
             else
             {
@@ -276,6 +337,37 @@ public class SpawnAnalyzer
         else
         {
             return 1.0f;
+        }
+    }
+
+    internal static float PredictBadLuckExtremeChanceMod(float luck)
+    {
+        if (luck < 0.0f)
+        {
+            return -9.0f * Math.Max(-1.0f, luck) + 1.0f;
+        }
+        else if (luck > 0.0f)
+        {
+            return -0.9f * Math.Min(luck, 1.0f) + 1.0f;
+        }
+        else
+        {
+            return 1.0f;
+        }
+    }
+
+    internal static void ReportUnknownPattern(string type, ILContext c, int index, int showBefore, int showAfter)
+    {
+        Console.WriteLine($"\n\x1b[1mUnsupported {type} at IL_{c.Instrs[index].Offset:x4}:\x1b[0m");
+
+        for (int i = Math.Max(0, index - showBefore); i <= Math.Min(index + showAfter, c.Instrs.Count); i++)
+        {
+            if (i == index)
+                Console.Write("-> ");
+            else
+                Console.Write("   ");
+            AssemblyPrint.Print(c.Instrs[i]);
+            Console.WriteLine();
         }
     }
 }

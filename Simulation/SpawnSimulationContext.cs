@@ -78,7 +78,7 @@ public class SpawnSimulationContext
                     currentTimeline = thisNode.timelines.Count;
                 }
             }
-            currentConnection.nextRandom = new() { node = index, timeline = currentTimeline };
+            currentConnection.nextNode = new() { node = index, timeline = currentTimeline };
             currentConnection = null;
         }
 
@@ -118,6 +118,8 @@ public class SpawnSimulationContext
 
         var timeline = node.timelines[currentTimeline];
 
+        // int nodeOffset = runData.Nodes[index].Offset;
+
         for (int i = 0; i < timeline.branches.Length; i++)
         {
             if (timeline.branches[i].ConnectionType != NodeConnectionType.NotExplored)
@@ -125,16 +127,18 @@ public class SpawnSimulationContext
                 continue;
             }
 
-            // Console.WriteLine($"Continue to branch {i}");
+            int retval = timeline.branches[i].info.returnValue;
+
+            // Console.WriteLine($"Hit node {index} (IL_{nodeOffset:x4}), return {retval}");
 
             currentConnection = timeline.branches[i];
 
             stop = false;
-            return timeline.branches[i].info.returnValue;
+            return retval;
         }
 
         stop = true;
-        // Console.WriteLine($"Stopping");
+        // Console.WriteLine($"Hit node {index} (IL_{nodeOffset:x4}), stop");
         return 0;
     }
 
@@ -146,14 +150,15 @@ public class SpawnSimulationContext
             throw new InvalidOperationException("Hit Spawn without hitting a random node first");
         }
 
-        currentConnection.nextSpawn = new()
+        if (currentConnection.spawns is null)
+            currentConnection.spawns = new();
+
+        currentConnection.spawns.Add(new()
         {
             npcId = type,
             x = x,
             y = y,
-        };
-
-        currentConnection = null;
+        });
     }
 
     internal object GetLastNodeStackStateClone()
@@ -178,7 +183,9 @@ public class SpawnSimulationContext
 
             if (currentConnection is not null)
             {
-                currentConnection.disconnected = true;
+                if (currentConnection.ConnectionType == NodeConnectionType.NotExplored) {
+                    currentConnection.disconnected = true;
+                }
                 currentConnection = null;
             }
 
@@ -243,6 +250,8 @@ public struct SimulationResult
 
 public class SimulationNodeInfo
 {
+    public int Offset;
+
     public StateType? stackStateType;
 
     public SimulationNode node;
@@ -289,11 +298,11 @@ public class NodeConnection
             {
                 return NodeConnectionType.NoConnection;
             }
-            else if (nextRandom is not null)
+            else if (nextNode is not null)
             {
                 return NodeConnectionType.RandomNode;
             }
-            else if (nextSpawn is not null)
+            else if (spawns is not null)
             {
                 return NodeConnectionType.SpawnNode;
             }
@@ -302,8 +311,8 @@ public class NodeConnection
     }
 
     public bool disconnected;
-    public NextRandomNode? nextRandom;
-    public NextSpawnNode? nextSpawn;
+    public NextRandomNode? nextNode;
+    public List<NextSpawnNode>? spawns;
 
     public NodeConnection(BranchInfo info, int node, int timeline, int branch)
     {

@@ -195,8 +195,17 @@ public class StateType
         return Expression.Lambda<Func<object, object>>(block, [param]).Compile();
     }
 
-    static bool IntListEq(List<int> a, List<int> b)
+    static bool IntListEq(List<int>? a, List<int>? b)
     {
+        if (a is null != b is null)
+        {
+            return false;
+        }
+        if (a is null || b is null)
+        {
+            return true;
+        }
+
         if (a.Count != b.Count)
         {
             return false;
@@ -213,13 +222,26 @@ public class StateType
         return true;
     }
 
-    static List<int> IntListClone(List<int> l)
+    static List<int>? IntListClone(List<int>? l)
     {
+        if (l is null)
+        {
+            return null!;
+        }
         return new(l);
     }
 
-    static bool IntArray1DEq(int[] a, int[] b)
+    static bool IntArray1DEq(int[]? a, int[]? b)
     {
+        if (a is null != b is null)
+        {
+            return false;
+        }
+        if (a is null || b is null)
+        {
+            return true;
+        }
+
         if (a.Length != b.Length)
         {
             return false;
@@ -236,8 +258,13 @@ public class StateType
         return true;
     }
 
-    static int[] IntArray1DClone(int[] a)
+    static int[]? IntArray1DClone(int[]? a)
     {
+        if (a is null)
+        {
+            return null;
+        }
+
         int[] clone = new int[a.Length];
 
         for (int i = 0; i < a.Length; i++)
@@ -248,8 +275,17 @@ public class StateType
         return clone;
     }
 
-    static bool IntArray2DEq(int[,] a, int[,] b)
+    static bool IntArray2DEq(int[,]? a, int[,]? b)
     {
+        if (a is null != b is null)
+        {
+            return false;
+        }
+        if (a is null || b is null)
+        {
+            return true;
+        }
+
         int l0 = a.GetLength(0);
         int l1 = a.GetLength(1);
         if (l0 != b.GetLength(0) || l1 != b.GetLength(1))
@@ -269,8 +305,13 @@ public class StateType
         return true;
     }
 
-    static int[,] IntArray2DClone(int[,] a)
+    static int[,]? IntArray2DClone(int[,]? a)
     {
+        if (a is null)
+        {
+            return null;
+        }
+        
         int l0 = a.GetLength(0);
         int l1 = a.GetLength(1);
 
