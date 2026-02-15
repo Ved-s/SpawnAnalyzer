@@ -20,9 +20,9 @@ namespace SpawnAnalyzer;
 
 // TODO: nodes for inputs with chances
 // TODO: no side effects in the simulated function
-// TODO: selftest on test methods
 
 // TODO: nodes for NPCCount
+// TODO: better selftests?
 
 // TODO: build method block tree to determine when locals end
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
@@ -48,11 +48,6 @@ public class SpawnAnalyzer
         MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
         MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
-
-        SelfTest();
-
-        Environment.Exit(1);
-
 
         Stopwatch sw = Stopwatch.StartNew();
         var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);

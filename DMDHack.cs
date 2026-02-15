@@ -29,8 +29,7 @@ static class DMDHack
             x=>x.MatchLdfld(out backingField!)
         ))
         {
-            Console.WriteLine("DMDHack fail");
-            Environment.Exit(1);
+            throw new Exception("DMDHack fail");
         }
 
         DynamicMethodDefinition m = new("DMDHack_SetNullOriginalMethod", null, [typeof(DynamicMethodDefinition)]);

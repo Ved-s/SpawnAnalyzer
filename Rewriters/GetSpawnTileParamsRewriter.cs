@@ -114,13 +114,7 @@ static class GetSpawnTileParamsRewriter
         bool match = SpawnAnalyzer.MatchInstructions(il, 0, out int matchEndPos, beginningMatchers);
         if (!match)
         {
-            Console.WriteLine($"GenerateGetSpawnTileParamsMethod match 1 fail at pos {matchEndPos}");
-            if (matchEndPos >= il.Instrs.Count)
-                Console.WriteLine($"Instruction OOB");
-            else
-                Console.WriteLine($"Instruction: {il.Instrs[matchEndPos]}");
-            Environment.Exit(1);
-            return;
+            throw new Exception($"GenerateGetSpawnTileParamsMethod match 1 fail at pos {matchEndPos} IL_{il.Instrs[matchEndPos].Offset:x4}");
         }
 
         ILCursor c = new(il);
@@ -181,13 +175,7 @@ static class GetSpawnTileParamsRewriter
         match = SpawnAnalyzer.MatchInstructions(il, c.Index, out matchEndPos, endingMatchers);
         if (!match)
         {
-            Console.WriteLine($"GenerateGetSpawnTileParamsMethod match 2 fail at pos {matchEndPos}");
-            if (matchEndPos >= il.Instrs.Count)
-                Console.WriteLine($"Instruction OOB");
-            else
-                Console.WriteLine($"Instruction: {il.Instrs[matchEndPos]}");
-            Environment.Exit(1);
-            return;
+            throw new Exception($"GenerateGetSpawnTileParamsMethod match 2 fail at pos {matchEndPos} IL_{il.Instrs[matchEndPos].Offset:x4}");
         }
 
         c.Index += 1;
@@ -261,8 +249,7 @@ static class GetSpawnTileParamsRewriter
         string spawnerTypeFullName = il.Import(typeof(NPC.Spawner)).FullName;
         while (c.TryGotoNext(x => x.MatchStfld(out FieldReference? field) && field.DeclaringType.FullName == spawnerTypeFullName))
         {
-            Console.WriteLine($"Spawner field setter! {il.Instrs[c.Index]}");
-            Environment.Exit(1);
+            throw new Exception($"Spawner field setter found at IL_{il.Instrs[c.Index].Offset}, should have been none left");
         }
 
         // Random spawn params are TODO, for now make sure there's no random
@@ -298,8 +285,7 @@ static class GetSpawnTileParamsRewriter
         string unifiedRandomFullName = il.Import(typeof(UnifiedRandom)).FullName;
         while (c.TryGotoNext(x => x.MatchCallOrCallvirt(out MethodReference? method) && method.DeclaringType.FullName == unifiedRandomFullName))
         {
-            Console.WriteLine($"Random still referenced! {il.Instrs[c.Index]}");
-            Environment.Exit(1);
+            throw new Exception($"UnifiedRandom call still exists at IL_{il.Instrs[c.Index].Offset}, should have been none left");
         }
 
         // Retarget old out arg assignments to new args
@@ -325,8 +311,7 @@ static class GetSpawnTileParamsRewriter
         c.Index = 0;
         if (!c.TryGotoNext(oldOutAssignmentMatchers))
         {
-            Console.WriteLine("Could not match old out assignments");
-            Environment.Exit(1);
+            throw new Exception("Could not match old out assignments");
         }
 
         c.Next.Operand = xRefParam;
@@ -396,8 +381,7 @@ static class GetSpawnTileParamsRewriter
             x => x.MatchStindI1()
         ))
         {
-            Console.WriteLine("xRange replace match fail");
-            Environment.Exit(1);
+            throw new Exception("xRange replace match fail");
         }
 
         c.Next.Operand = spawnParamsParam;
@@ -422,25 +406,5 @@ static class GetSpawnTileParamsRewriter
         il.Method.Parameters.Add(spawnRectParam);
         il.Method.Parameters.Add(safeRectParam);
         il.Method.Parameters.Add(spawnParamsParam);
-
-        foreach (ILLabel label in il.Labels)
-        {
-            List<Instruction> branches = label.Branches.ToList();
-            if (branches.Count == 0)
-            {
-                label.Target = il.Instrs[0];
-            }
-            else if (il.IndexOf(label.Target) >= il.Instrs.Count)
-            {
-                Console.WriteLine($"Instructions: {il.Instrs.Count}");
-                Console.WriteLine($"Label has {branches.Count} jumps but no target:");
-                foreach (Instruction t in branches)
-                {
-                    Console.WriteLine($"[{il.IndexOf(t)}] Offset {t.Offset:x}");
-                }
-                Console.Out.Flush();
-                Environment.Exit(1);
-            }
-        }
     }
 }

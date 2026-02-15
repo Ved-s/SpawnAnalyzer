@@ -230,14 +230,10 @@ public class StackAnalyzer
                         }
                         break;
                     }
-                    Console.WriteLine($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
-                    Environment.Exit(-1);
-                    break;
+                    throw new NotSupportedException($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
 
                 default:
-                    Console.WriteLine($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
-                    Environment.Exit(-1);
-                    break;
+                    throw new NotSupportedException($"Unsupported StackBehaviourPop {opCode.StackBehaviourPop} of opcode {opCode}");
             }
 
             switch (opCode.StackBehaviourPush)
@@ -389,9 +385,7 @@ public class StackAnalyzer
                     }
                     else
                     {
-                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
-                        Environment.Exit(-1);
-                        break;
+                        throw new NotSupportedException($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
                     }
 
                     value.producedBy.Add(instr);
@@ -421,9 +415,7 @@ public class StackAnalyzer
                     }
                     else
                     {
-                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
-                        Environment.Exit(-1);
-                        break;
+                        throw new NotSupportedException($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
                     }
                     break;
 

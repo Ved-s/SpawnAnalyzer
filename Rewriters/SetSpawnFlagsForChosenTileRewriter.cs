@@ -81,9 +81,7 @@ class SetSpawnFlagsForChosenTileRewriter
             var (xmatch, ymatch, emit) = marbleGraniteReplacers[i];
             if (MatchMarbleGraniteChance(c, xmatch, ymatch) is not MatchMarbleGraniteChanceResult res)
             {
-                Console.WriteLine($"Failed to match marble/granite replacement {i}");
-                Environment.Exit(1);
-                return;
+                throw new Exception($"Failed to match marble/granite replacement {i}");
             }
 
             c.Next!.OpCode = OpCodes.Nop;
@@ -131,9 +129,7 @@ class SetSpawnFlagsForChosenTileRewriter
 
             if (!MatchSpiderOrDesertChance(c, pre, post, field, out int instructionsMatched))
             {
-                Console.WriteLine($"Failed to match spider/desert replacement {i}");
-                Environment.Exit(1);
-                return;
+                throw new Exception($"Failed to match spider/desert replacement {i}");
             }
 
             c.Next!.OpCode = OpCodes.Nop;
@@ -187,8 +183,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 x => x == endif.Target
             ))
             {
-                Console.WriteLine($"Ocean/beach chance matcher {i} fail");
-                Environment.Exit(1);
+                throw new Exception($"Ocean/beach chance matcher {i} fail");
             }
 
             FieldReference chanceField = new(field.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnParamsStage2)));
@@ -215,16 +210,12 @@ class SetSpawnFlagsForChosenTileRewriter
             FieldInfo? spawnerField = typeof(NPC.Spawner).GetField(spawnerFieldName, (BindingFlags)(-1));
             if (spawnerField is null)
             {
-                Console.WriteLine($"{nameof(SpawnParamsStage2)}.{field.Name} doesn't have a corresponding Spawner field!");
-                Environment.Exit(1);
-                return;
+                throw new Exception($"{nameof(SpawnParamsStage2)}.{field.Name} doesn't have a corresponding Spawner field!");
             }
 
             if (spawnerField.FieldType != typeof(bool))
             {
-                Console.WriteLine($"Spawner.{spawnerField.Name} has invalid type: {spawnerField.FieldType}!");
-                Environment.Exit(1);
-                return;
+                throw new Exception($"Spawner.{spawnerField.Name} has invalid type: {spawnerField.FieldType}!");
             }
 
             overriddenChanceFieldNames.Add(spawnerFieldName);

@@ -93,8 +93,7 @@ public class SpawnAnNPCRewriter
             x => x.MatchLdsfld<Main>("rand")
         ))
         {
-            Console.WriteLine($"Found Main.rand reference at IL_{c.Next!.Offset:x4}");
-            Environment.Exit(1);
+            throw new Exception($"Found Main.rand reference at IL_{c.Next!.Offset:x4}, should have none left");
         }
 
         c.Index = 0;
@@ -189,8 +188,7 @@ public class SpawnAnNPCRewriter
         {
             ulong totalSpawns = knownSpawns + unknownSpawns;
             double done = (double)knownSpawns / totalSpawns;
-            Console.WriteLine($"{done * 100:0.0}% ({knownSpawns}/{totalSpawns}) of SpawnNPC calls patched");
-            Environment.Exit(1);
+            throw new Exception($"{done * 100:0.0}% ({knownSpawns}/{totalSpawns}) of SpawnNPC calls patched");
         }
 
         c.Index = 0;
