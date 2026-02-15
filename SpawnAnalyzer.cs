@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.Serialization;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -17,6 +16,12 @@ using Terraria.ID;
 using Terraria.UI;
 
 namespace SpawnAnalyzer;
+
+// TODO: nodes for inputs with chances
+// TODO: no side effects in the simulated function
+// TODO: selftest on test methods
+
+// TODO: nodes for NPCCount
 
 // TODO: build method block tree to determine when locals end
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
@@ -39,17 +44,18 @@ public class SpawnAnalyzer
     {
         Player.Hooks.OnEnterWorld += (_) => AnalyzeInTicks = 10;
 
-        MainUpdateHook = new Hook(typeof(Main).GetMethod("Update", (BindingFlags)(-1)), On_Main_Update);
-        MainDrawMouseOverHook = new Hook(typeof(Main).GetMethod("DrawMouseOver", (BindingFlags)(-1)), On_Main_DrawMouseOver);
-        MainSetupDrawInterfaceLayersHook = new Hook(typeof(Main).GetMethod("SetupDrawInterfaceLayers", (BindingFlags)(-1)), On_Main_SetupDrawInterfaceLayers);
-
-
+        MainUpdateHook                   = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
+        MainDrawMouseOverHook            = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
+        MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
+        
         Stopwatch sw = Stopwatch.StartNew();
         var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);
         sw.Stop();
         Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
 
+#pragma warning disable SYSLIB0050 // Type or member is obsolete
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
+#pragma warning restore SYSLIB0050 // Type or member is obsolete
 
         int x = 100;
         int y = 100;
@@ -214,7 +220,6 @@ public class SpawnAnalyzer
                     break;
 
                 case NodeConnectionType.NoConnection:
-                    Console.WriteLine($"NoConnection at node {node} timeline {timeline} branch {branch} percent {percent*100:0.0}");
                     if (!spawns.TryGetValue(int.MinValue, out oldvalue))
                     {
                         oldvalue = (new(), 0);
@@ -294,7 +299,7 @@ public class SpawnAnalyzer
     {
         orig(self);
 
-        List<GameInterfaceLayer> layers = (List<GameInterfaceLayer>)typeof(Main).GetField("_gameInterfaceLayers", (BindingFlags)(-1)).GetValue(self);
+        List<GameInterfaceLayer> layers = (List<GameInterfaceLayer>)Utils.GetFieldOrThrow<Main>("_gameInterfaceLayers").GetValue(self)!;
         layers.Add(new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
         {
             LastAnalysis?.DrawOverlay(Main.spriteBatch);

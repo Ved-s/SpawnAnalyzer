@@ -18,15 +18,13 @@ static class GetSpawnTileParamsRewriter
 {
     public static SpawnAnalyzer.GetSpawnTileParams GenerateMethod()
     {
-        DynamicMethodDefinition dmd = new(typeof(NPC.Spawner).GetMethod("FindSpawnTile",
-            BindingFlags.Instance | BindingFlags.Public, null,
+        DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("FindSpawnTile",
             [
                 typeof(Player),
                 typeof(int).MakeByRefType(),
                 typeof(int).MakeByRefType(),
                 typeof(bool).MakeByRefType(),
-            ],
-            null
+            ]
         ));
 
         dmd.Definition.IsStatic = false;

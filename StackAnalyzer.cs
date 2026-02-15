@@ -8,6 +8,8 @@ using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.Utils;
 
+namespace SpawnAnalyzer;
+
 public class StackAnalyzer
 {
     private StackAnalyzer() { }
@@ -85,11 +87,11 @@ public class StackAnalyzer
 
 
     static OpCode[] ComparisonOpcodes = [
-        OpCodes.Ceq,  
-        OpCodes.Cgt,  
-        OpCodes.Cgt_Un,  
-        OpCodes.Clt,  
-        OpCodes.Clt_Un,  
+        OpCodes.Ceq,
+        OpCodes.Cgt,
+        OpCodes.Cgt_Un,
+        OpCodes.Clt,
+        OpCodes.Clt_Un,
     ];
 
 
@@ -373,7 +375,7 @@ public class StackAnalyzer
                     {
                         value = new(null, typeof(object), SimpleType.Object);
                     }
-                    else if (ConversionOpcodes.TryGetValue(opCode, out Type convertedType))
+                    else if (ConversionOpcodes.TryGetValue(opCode, out Type? convertedType))
                     {
                         value = new(null, convertedType, SimpleTypeFromSystemType(convertedType));
                     }
@@ -381,7 +383,7 @@ public class StackAnalyzer
                     {
                         value = new(null, typeof(byte), SimpleType.Integer);
                     }
-                    else if (LdelemSimpleOpcodes.TryGetValue(opCode, out Type valueType))
+                    else if (LdelemSimpleOpcodes.TryGetValue(opCode, out Type? valueType))
                     {
                         value = new(null, valueType, SimpleTypeFromSystemType(valueType));
                     }
@@ -513,7 +515,7 @@ public class StackAnalyzer
                 case FlowControl.Next:
                     if (populatedInstructionInputs[i + 1])
                     {
-                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i+1].instruction);
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i + 1].instruction);
                     }
                     else
                     {
@@ -529,7 +531,7 @@ public class StackAnalyzer
 
                     if (populatedInstructionInputs[i + 1])
                     {
-                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i+1].instruction);
+                        MergeStackValues(infos[i + 1].inValues, info.outValues, infos, infos[i + 1].instruction);
                     }
                     else
                     {
@@ -696,6 +698,51 @@ public class StackAnalysis
 
     public InstructionStackInfo? LookupInstruction(Instruction instr, out int index)
     {
+        // if (instr.Offset > 0)
+        // {
+        //     int start = 0;
+        //     int end = instructions.Count;
+
+        //     while (true)
+        //     {
+        //         int size = end - start;
+
+        //         if (size < 64)
+        //         {
+        //             for (int i = start; i < end; i++)
+        //             {
+        //                 if (instructions[i].instruction == instr)
+        //                 {
+        //                     index = i;
+        //                     return instructions[i];
+        //                 }
+        //             }
+        //             break;
+        //         }
+
+        //         int midpoint = start + size / 2;
+
+        //         for (int i = midpoint; i < end; i++)
+        //         {
+        //             int offset = instructions[i].instruction.Offset;
+        //             if (offset == 0)
+        //             {
+        //                 continue;
+        //             }
+
+        //             if (offset == instr.Offset && instructions[i].instruction == instr)
+        //             {
+        //                 index = i;
+        //                 return instructions[i];
+        //             }
+        //             else if (offset > instr.Offset)
+        //             {
+                        
+        //             }
+        //         }
+        //     }
+        // }
+
         index = -1;
 
         for (int i = 0; i < instructions.Count; i++)

@@ -1,3 +1,5 @@
+namespace SpawnAnalyzer;
+
 static class DnSpyAnsiColors
 {
     public static string reset = "\x1b[0m";

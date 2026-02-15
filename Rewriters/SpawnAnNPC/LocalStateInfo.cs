@@ -31,7 +31,7 @@ public class LocalStateInfo
             c.Next!.Operand = contextParam;
             c.Index += 1;
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
-            c.Emit(OpCodes.Ldfld, il.Import(type.Type.GetField(StateType.GetFieldName(local), (BindingFlags)(-1))));
+            c.Emit(OpCodes.Ldfld, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
         }
 
         c.Index = 0;
@@ -46,7 +46,7 @@ public class LocalStateInfo
             c.Emit(OpCodes.Ldarg, contextParam);
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
             c.Emit(OpCodes.Ldloc, local);
-            c.Emit(OpCodes.Stfld, il.Import(type.Type.GetField(StateType.GetFieldName(local), (BindingFlags)(-1))));
+            c.Emit(OpCodes.Stfld, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
         }
 
         return type;

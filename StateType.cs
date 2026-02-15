@@ -19,16 +19,16 @@ public class StateType
 
     static readonly Dictionary<Type, MethodInfo> EqMethods = new()
     {
-        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListEq), (BindingFlags)(-1))},
-        {typeof(int[]), typeof(StateType).GetMethod(nameof(IntArray1DEq), (BindingFlags)(-1))},
-        {typeof(int[,]), typeof(StateType).GetMethod(nameof(IntArray2DEq), (BindingFlags)(-1))},
+        {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListEq))},
+        {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DEq))},
+        {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DEq))},
     };
 
     static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
     {
-        {typeof(List<int>), typeof(StateType).GetMethod(nameof(IntListClone), (BindingFlags)(-1))},
-        {typeof(int[]), typeof(StateType).GetMethod(nameof(IntArray1DClone), (BindingFlags)(-1))},
-        {typeof(int[,]), typeof(StateType).GetMethod(nameof(IntArray2DClone), (BindingFlags)(-1))},
+        {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListClone))},
+        {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DClone))},
+        {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DClone))},
     };
 
     public Type Type;
@@ -90,7 +90,7 @@ public class StateType
         {
             Expression neq;
 
-            if (EqMethods.TryGetValue(field.FieldType, out MethodInfo eqMethod))
+            if (EqMethods.TryGetValue(field.FieldType, out MethodInfo? eqMethod))
             {
                 neq = Expression.Not(
                     Expression.Call(
@@ -142,7 +142,9 @@ public class StateType
             ),
         ];
 
-        MethodInfo initializer = typeof(FormatterServices).GetMethod("GetSafeUninitializedObject", (BindingFlags)(-1));
+#pragma warning disable SYSLIB0050 // Type or member is obsolete
+        MethodInfo initializer = Utils.GetMethodOrThrow(typeof(FormatterServices), "GetSafeUninitializedObject");
+#pragma warning restore SYSLIB0050 // Type or member is obsolete
 
         exprs.Add(
             Expression.Assign(
@@ -160,7 +162,7 @@ public class StateType
         {
             Expression value;
 
-            if (CloneMethods.TryGetValue(field.FieldType, out MethodInfo cloneMethod))
+            if (CloneMethods.TryGetValue(field.FieldType, out MethodInfo? cloneMethod))
             {
                 value = Expression.Call(
                     cloneMethod,

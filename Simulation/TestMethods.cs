@@ -5,6 +5,10 @@ using System.Security.Cryptography.X509Certificates;
 using Terraria;
 using Terraria.GameContent.Events;
 
+namespace SpawnAnalyzer.Simulation;
+
+using Utils = Terraria.Utils;
+
 #pragma warning disable IDE0060 // Remove unused parameter
 
 public static class TestMethods

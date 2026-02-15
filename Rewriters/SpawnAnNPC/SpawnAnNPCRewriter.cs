@@ -21,16 +21,14 @@ public class SpawnAnNPCRewriter
 {
     public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true)
     {
-        MethodInfo method = methodOverride ?? typeof(NPC.Spawner).GetMethod("SpawnAnNPC",
-            BindingFlags.Instance | BindingFlags.Public, null,
+        MethodInfo method = methodOverride ?? Utils.GetMethodOrThrow<NPC.Spawner>("SpawnAnNPC",
             [
                 typeof(int),
                 typeof(int),
                 typeof(int),
                 typeof(bool),
                 typeof(int),
-            ],
-            null
+            ]
         );
 
         DynamicMethodDefinition dmd = new(method);
@@ -53,11 +51,11 @@ public class SpawnAnNPCRewriter
             }
         }
 
-        var stack = StackAnalyzer.Analyze(il);
-        il.FancyPrintout(stack.instructions);
+        // var stack = StackAnalyzer.Analyze(il);
+        // il.FancyPrintout(stack.instructions);
 
-        Console.WriteLine("Rewrite OK");
-        Console.WriteLine();
+        // Console.WriteLine("Rewrite OK");
+        // Console.WriteLine();
 
         DMDHack.SetNullOriginalMethod(dmd);
 

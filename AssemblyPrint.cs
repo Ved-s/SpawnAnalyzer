@@ -233,9 +233,12 @@ static class AssemblyPrint
     {
         Print(field.FieldType);
         Console.Write(" ");
-        Print(field.DeclaringType, false);
-        Console.Write(DnSpyAnsiColors.punctuation);
-        Console.Write("::");
+        if (field.DeclaringType is not null)
+        {
+            Print(field.DeclaringType, false);
+            Console.Write(DnSpyAnsiColors.punctuation);
+            Console.Write("::");
+        }
         if (field.IsStatic)
             Console.Write(DnSpyAnsiColors.staticfield);
         else
@@ -342,7 +345,7 @@ static class AssemblyPrint
     {
         if (type.IsArray)
         {
-            Print(type.GetElementType());
+            Print(type.GetElementType()!);
             Console.Write(DnSpyAnsiColors.punctuation);
             Console.Write("[");
             int rank = type.GetArrayRank();
@@ -356,7 +359,7 @@ static class AssemblyPrint
 
         if (type.IsByRef)
         {
-            Print(type.GetElementType());
+            Print(type.GetElementType()!);
             Console.Write(DnSpyAnsiColors.punctuation);
             Console.Write("&");
             return;
@@ -389,7 +392,7 @@ static class AssemblyPrint
 
         if (type.IsNested)
         {
-            Print(type.DeclaringType, withPrefix);
+            Print(type.DeclaringType!, withPrefix);
             Console.Write(DnSpyAnsiColors.punctuation);
             Console.Write("/");
         }

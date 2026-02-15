@@ -27,7 +27,9 @@ class SpawnAnalysisSpot
         Position = position;
 
         NPC.Spawner.GetProperGroundSpawnTileTypeAndWallType(position.X, position.Y, out SpawnTileType, out SpawnWallType);
+#pragma warning disable SYSLIB0050 // Type or member is obsolete
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
+#pragma warning restore SYSLIB0050 // Type or member is obsolete
         ShallowCloneFields(globalSpawner, spawner);
         LocalSpawner = spawner;
 
@@ -67,7 +69,7 @@ class SpawnAnalysisSpot
             FieldInfo? chanceField = typeof(SpawnParamsStage2).GetField(chanceName, (BindingFlags)(-1));
             if (chanceField is not null)
             {
-                float chance = (float)chanceField.GetValue(Params2);
+                float chance = (float)chanceField.GetValue(Params2)!;
                 if (chance == 0f)
                 {
                     continue;
@@ -88,13 +90,13 @@ class SpawnAnalysisSpot
                 continue;
             }
 
-            object globalValue = field.GetValue(GlobalSpawner);
-            object localValue = field.GetValue(LocalSpawner);
+            object globalValue = field.GetValue(GlobalSpawner)!;
+            object localValue = field.GetValue(LocalSpawner)!;
             object defaultValue = field.Name switch
             {
                 "defaultTarget" => 255,
                 "numberOfActivePlayers" => 1,
-                _ => Activator.CreateInstance(field.FieldType),
+                _ => Activator.CreateInstance(field.FieldType)!,
             };
 
             bool eqGlobal = Equals(globalValue, localValue);
@@ -102,7 +104,7 @@ class SpawnAnalysisSpot
             if (eqGlobal && eqDefault)
                 continue;
 
-            MethodInfo toStringMethod = field.FieldType.GetMethod("ToString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [], null);
+            MethodInfo toStringMethod = Utils.GetMethodOrThrow(field.FieldType, "ToString", []);
             if (toStringMethod.ReturnType != typeof(string))
                 continue;
 
@@ -113,12 +115,12 @@ class SpawnAnalysisSpot
                 firstLocal = false;
             }
 
-            string str = (string)toStringMethod.Invoke(localValue, []);
+            string str = (string)toStringMethod.Invoke(localValue, [])!;
             builder.Append("  ");
             builder.Append(field.Name);
             builder.Append(": ");
             builder.Append(str);
-            builder.Append("\n");
+            builder.Append('\n');
         }
         if (globalValues.Length > 0)
         {

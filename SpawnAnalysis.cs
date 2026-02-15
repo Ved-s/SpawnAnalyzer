@@ -23,7 +23,7 @@ class SpawnAnalysis
     {
         NPC.Spawner.GetSpawnArea(player, out SpawnArea, out SafeArea);
 
-        typeof(NPC.Spawner).GetMethod("SetSpawnFlags", (BindingFlags)(-1)).Invoke(GlobalSpawner, new[] { player });
+        Utils.GetMethodOrThrow<NPC.Spawner>("SetSpawnFlags").Invoke(GlobalSpawner, [player]);
 
         // Seems like GetSpawnTileParams only outputs one type of spawn params per tile, pick the first
         // and show warnings on multiple different
@@ -39,7 +39,7 @@ class SpawnAnalysis
                 if (SpawnAnalyzer.GetSpawnTileParamsImpl(GlobalSpawner, player, ref xRef, ref yRef, SpawnArea, SafeArea, out SpawnParamsStage1 spawnParams))
                 {
 
-                    if (!FoundSpawnSpots.TryGetValue(new(xRef, yRef), out SpawnAnalysisSpot spot))
+                    if (!FoundSpawnSpots.TryGetValue(new(xRef, yRef), out SpawnAnalysisSpot? spot))
                     {
                         FoundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(GlobalSpawner, new(xRef, yRef), spawnParams));
                         continue;

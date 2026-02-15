@@ -14,7 +14,10 @@ static class DMDHack
 
     static SetNullOriginalMethodDelegate GenerateSetNullOriginalMethod()
     {
-        DynamicMethodDefinition d = new(typeof(DynamicMethodDefinition).GetProperty("OriginalMethod", (BindingFlags)(-1)).GetGetMethod());
+        DynamicMethodDefinition d = new(
+            Utils.GetPropertyOrThrow(typeof(DynamicMethodDefinition), "OriginalMethod")
+            .GetGetMethod() ?? throw new MissingMethodException("DynamicMethodDefinition.OriginalMethod::get")
+        );
 
         ILContext dil = new(d.Definition);
 

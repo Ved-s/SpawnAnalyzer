@@ -22,7 +22,7 @@ public struct SpawnParamsStage1
         return !(a == b);
     }
 
-    public override readonly bool Equals(object obj)
+    public override readonly bool Equals(object? obj)
     {
         return obj is SpawnParamsStage1 stp && stp == this;
     }

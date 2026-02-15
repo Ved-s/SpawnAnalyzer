@@ -17,15 +17,13 @@ class SetSpawnFlagsForChosenTileRewriter
 {
     public static SpawnAnalyzer.SetSpawnFlagsForChosenTile GenerateMethod()
     {
-        DynamicMethodDefinition dmd = new(typeof(NPC.Spawner).GetMethod("SetSpawnFlagsForChosenTile",
-            BindingFlags.Instance | BindingFlags.Public, null,
+        DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("SetSpawnFlagsForChosenTile",
             [
                 typeof(int),
                 typeof(int),
                 typeof(int),
                 typeof(int),
-            ],
-            null
+            ]
         ));
 
         ILContext il = new(dmd.Definition);

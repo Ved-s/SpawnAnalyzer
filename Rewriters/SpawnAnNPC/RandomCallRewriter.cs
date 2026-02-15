@@ -118,19 +118,19 @@ class RandomCallRewriter
                 passingStackValues[vi] = stackInfo.outValues[vi];
             }
 
-            c.Goto(c.Instrs.IndexOf(instr) + 1);
+            c.Goto(instr.Next);
             ValueHandler? valueHandler = TryCreateValueHandler(c, stackInfo.outValues[stackInfo.outValues.Count - 1], allowUnknownPatterns);
             if (valueHandler is null)
             {
                 SpawnAnalyzer.ReportUnknownPattern("random call value handler", c.Context, c.Instrs.IndexOf(instr) + 1, 2, 10);
-                c.Goto(c.Instrs.IndexOf(instr) + 1);
+                c.Goto(instr.Next);
                 unknownPatterns++;
                 continue;
             }
 
             if (method.Parameters.Count == 1 && method.Parameters[0].ParameterType.Is(typeof(int)))
             {
-                c.Goto(c.Instrs.IndexOf(instr) - 1);
+                c.Goto(instr.Previous);
                 Instruction lastParamInitInstr = c.Next!;
 
                 ParamProvider<int> param = CreateSingleIntProvider(c);
@@ -139,7 +139,7 @@ class RandomCallRewriter
                 if (node is null)
                 {
                     SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
+                    c.Goto(instr.Next);
                     unknownPatterns++;
                     continue;
                 }
@@ -163,7 +163,7 @@ class RandomCallRewriter
              && method.Parameters[1].ParameterType.Is(typeof(int))
             )
             {
-                c.Goto(c.Instrs.IndexOf(instr) - 1);
+                c.Goto(instr.Previous);
                 Instruction lastParamInitInstr = c.Next!;
 
                 ParamProvider<(int, int)> param = CreateDoubleIntProvider(c);
@@ -172,7 +172,7 @@ class RandomCallRewriter
                 if (node is null)
                 {
                     SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
+                    c.Goto(instr.Next);
                     unknownPatterns++;
                     continue;
                 }
@@ -198,7 +198,7 @@ class RandomCallRewriter
                 if (!SelectRandomNode.SupportsArrayElementType(valueType))
                 {
                     SpawnAnalyzer.ReportUnknownPattern("SelectRandom value type", c.Context, c.Instrs.IndexOf(instr), 10, 5);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
+                    c.Goto(instr.Next);
                     unknownPatterns++;
                     continue;
                 }
@@ -210,7 +210,7 @@ class RandomCallRewriter
                 if (node is null)
                 {
                     SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
-                    c.Goto(c.Instrs.IndexOf(instr) + 1);
+                    c.Goto(instr.Next);
                     unknownPatterns++;
                     continue;
                 }
@@ -230,7 +230,7 @@ class RandomCallRewriter
             }
 
             SpawnAnalyzer.ReportUnknownPattern("random call", c.Context, c.Instrs.IndexOf(instr), 10, 5);
-            c.Goto(c.Instrs.IndexOf(instr) + 1);
+            c.Goto(instr.Next);
             unknownPatterns++;
             continue;
         }
@@ -348,7 +348,7 @@ class RandomCallRewriter
                 {
                     case StackValuePreserveType.Preserve:
                         c.Emit(OpCodes.Ldloc, stackStateVar);
-                        c.Emit(OpCodes.Ldfld, stackStateType!.Type.GetField(StateType.GetFieldName(fieldIndex), (BindingFlags)(-1)));
+                        c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, StateType.GetFieldName(fieldIndex)));
                         fieldIndex++;
                         break;
 
@@ -564,9 +564,10 @@ class RandomCallRewriter
 
         LocalBuilder stateVar = il.DeclareLocal(stackStateType);
 
-        MethodInfo createInstance = typeof(Activator)
+        MethodInfo createInstance = (typeof(Activator)
             .GetMethods()
             .FirstOrDefault(m => m.Name == "CreateInstance" && m.IsGenericMethod)
+            ?? throw new MissingMethodException("Activator::CreateInstance<T>"))
             .MakeGenericMethod([stackStateType]);
 
         il.Emit(ROpCodes.Call, createInstance);
@@ -579,7 +580,7 @@ class RandomCallRewriter
             {
                 il.Emit(ROpCodes.Ldloc, stateVar);
                 il.Emit(ROpCodes.Ldarg, i);
-                il.Emit(ROpCodes.Stfld, stackStateType.GetField(StateType.GetFieldName(fieldIndex), (BindingFlags)(-1)));
+                il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, StateType.GetFieldName(fieldIndex)));
 
                 fieldIndex++;
             }
@@ -587,7 +588,7 @@ class RandomCallRewriter
 
         il.Emit(ROpCodes.Ldarg, pt.Length - 1);
         il.Emit(ROpCodes.Ldloc, stateVar);
-        il.Emit(ROpCodes.Stfld, typeof(SpawnSimulationContext).GetField("stackState", (BindingFlags)(-1)));
+        il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow<SpawnSimulationContext>("stackState"));
 
         il.Emit(ROpCodes.Ret);
 
