@@ -29,6 +29,8 @@ class RandomCallRewriter
     readonly VariableDefinition stackStateVar;
     readonly VariableDefinition tempIntVar;
     readonly List<ILLabel> entryJumps;
+    readonly HashSet<FieldInfo> allowFields;
+    readonly HashSet<MethodInfo> allowMethods;
 
     static Dictionary<Mono.Cecil.Cil.OpCode, EqualityType> ConditionalOpcodeEqualityTypes = new()
     {
@@ -60,7 +62,9 @@ class RandomCallRewriter
         VariableDefinition randomParamVar,
         VariableDefinition stackStateVar,
         VariableDefinition tempIntVar,
-        List<ILLabel> entryJumps
+        List<ILLabel> entryJumps,
+        HashSet<FieldInfo> allowFields,
+        HashSet<MethodInfo> allowMethods
     )
     {
         this.nodes = nodes;
@@ -70,6 +74,8 @@ class RandomCallRewriter
         this.stackStateVar = stackStateVar;
         this.tempIntVar = tempIntVar;
         this.entryJumps = entryJumps;
+        this.allowFields = allowFields;
+        this.allowMethods = allowMethods;
     }
 
     public void RewriteRandomCalls(ILCursor c, StackAnalysis stack, bool allowUnknownPatterns)
@@ -238,8 +244,7 @@ class RandomCallRewriter
         if (unknownPatterns > 0)
         {
             double percent = (double)knownPatterns / (knownPatterns + unknownPatterns) * 100;
-            Console.WriteLine($"\n{percent:0.0}% ({knownPatterns}/{knownPatterns + unknownPatterns}) of Random calls were patched");
-            Environment.Exit(1);
+            throw new Exception($"\n{percent:0.0}% ({knownPatterns}/{knownPatterns + unknownPatterns}) of Random calls were patched");
         }
     }
 
@@ -298,6 +303,8 @@ class RandomCallRewriter
             MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackValues, stackValuePreserves, stackStateType.Type);
             c.Emit(OpCodes.Ldarg, contextParam);
             c.Emit(OpCodes.Call, stackSaveMethod);
+
+            allowMethods.Add(stackSaveMethod);
 
             // foreach (var _ in stackValuePreserves)
             // {

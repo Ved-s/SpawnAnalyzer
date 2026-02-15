@@ -277,8 +277,7 @@ class SetSpawnFlagsForChosenTileRewriter
         {
             if (instr.Operand is FieldReference field && field.DeclaringType.Is(typeof(NPC.Spawner)) && overriddenChanceFieldNames.Contains(field.Name))
             {
-                Console.WriteLine($"Found instruction referencing overridden field: {instr}");
-                Environment.Exit(1);
+                throw new Exception($"Found instruction referencing overridden field: {instr}");
             }
         }
 
@@ -321,9 +320,7 @@ class SetSpawnFlagsForChosenTileRewriter
                     break;
 
                 default:
-                    Console.WriteLine("Unknown Next method!");
-                    Environment.Exit(1);
-                    return;
+                    throw new Exception("Unknown Next method!");
             }
         }
 
@@ -1117,8 +1114,7 @@ class SetSpawnFlagsForChosenTileRewriter
             x => firstConditionEnd.Target == x
         ))
         {
-            Console.WriteLine("PatchSurfaceSpawnAndDaytimeForRemix initial match fail");
-            Environment.Exit(1);
+            throw new Exception("PatchSurfaceSpawnAndDaytimeForRemix initial match fail");
         }
         int beginning = c.Index;
         c.GotoLabel(secondConditionEnd);
@@ -1131,16 +1127,7 @@ class SetSpawnFlagsForChosenTileRewriter
             x => x.MatchStfld<NPC.Spawner>("surfaceSpawn")
         ))
         {
-            Console.WriteLine($"PatchSurfaceSpawnAndDaytimeForRemix second match fail");
-            try
-            {
-                Console.WriteLine($" at {c.Instrs[matchEndPos]} (match instruction {matchEndPos - c.Index})");
-            }
-            catch
-            {
-                Console.WriteLine($" at IL_{c.Instrs[matchEndPos].Offset:x04} <err> (match instruction {matchEndPos - c.Index})");
-            }
-            Environment.Exit(1);
+            throw new Exception($"PatchSurfaceSpawnAndDaytimeForRemix second match fail at IL_{c.Instrs[matchEndPos].Offset:x04}");
         }
 
         c.Index = beginning;

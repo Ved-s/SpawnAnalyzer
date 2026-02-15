@@ -29,7 +29,7 @@ static class DMDHack
             x=>x.MatchLdfld(out backingField!)
         ))
         {
-            throw new Exception("DMDHack fail");
+            throw new Exception("DMDHack match fail");
         }
 
         DynamicMethodDefinition m = new("DMDHack_SetNullOriginalMethod", null, [typeof(DynamicMethodDefinition)]);

@@ -441,9 +441,7 @@ public class StackAnalyzer
                     }
                     else
                     {
-                        Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
-                        Environment.Exit(-1);
-                        break;
+                        throw new NotSupportedException($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
                     }
 
                     value1.producedBy.Add(instr);
@@ -453,9 +451,7 @@ public class StackAnalyzer
                     break;
 
                 default:
-                    Console.WriteLine($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
-                    Environment.Exit(-1);
-                    break;
+                    throw new NotSupportedException($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
             }
 
             if (opCode.FlowControl == FlowControl.Return)
@@ -588,14 +584,10 @@ public class StackAnalyzer
                         break;
                     }
 
-                    Console.WriteLine($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
-                    Environment.Exit(-1);
-                    break;
+                    throw new NotSupportedException($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
 
                 default:
-                    Console.WriteLine($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
-                    Environment.Exit(-1);
-                    break;
+                    throw new NotSupportedException($"Unsupported FlowControl {opCode.FlowControl} of opcode {opCode}");
             }
         }
 

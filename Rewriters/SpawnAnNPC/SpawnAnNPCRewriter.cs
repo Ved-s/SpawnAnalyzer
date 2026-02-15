@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -13,12 +15,45 @@ using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
 using Terraria;
 using Terraria.Utilities;
+
+using OpCode = Mono.Cecil.Cil.OpCode;
 using OpCodes = Mono.Cecil.Cil.OpCodes;
 
 namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
 
 public class SpawnAnNPCRewriter
 {
+
+    static OpCode[] StelemOpcodes = [
+        OpCodes.Stelem_Any,
+        OpCodes.Stelem_I,
+        OpCodes.Stelem_I1,
+        OpCodes.Stelem_I2,
+        OpCodes.Stelem_I4,
+        OpCodes.Stelem_I8,
+        OpCodes.Stelem_R4,
+        OpCodes.Stelem_R8,
+        OpCodes.Stelem_Ref,
+    ];
+
+    static OpCode[] OutsideWritingOpcodes = [
+        OpCodes.Stfld,
+        OpCodes.Stsfld,
+        OpCodes.Stind_I,
+        OpCodes.Stind_I1,
+        OpCodes.Stind_I2,
+        OpCodes.Stind_I4,
+        OpCodes.Stind_I8,
+        OpCodes.Stind_R4,
+        OpCodes.Stind_R8,
+        OpCodes.Stind_Ref,
+        OpCodes.Stobj,
+        OpCodes.Call,
+        OpCodes.Calli,
+        OpCodes.Callvirt,
+
+        ..StelemOpcodes
+    ];
     public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true)
     {
         MethodInfo method = methodOverride ?? Utils.GetMethodOrThrow<NPC.Spawner>("SpawnAnNPC",
@@ -83,7 +118,24 @@ public class SpawnAnNPCRewriter
         ILLabel mainEntryLabel = il.DefineLabel();
         List<ILLabel> entryJumps = [];
 
-        RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, stackStateVar, tempIntVar, entryJumps);
+        HashSet<FieldInfo> allowFields = new();
+        HashSet<MethodInfo> allowMethods = [
+
+            Utils.GetMethodOrThrow<SpawnSimulationContext>("NodeHit"),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>("ExitNodeHit"),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>("GetLastNodeStackStateClone"),
+
+            Utils.GetMethodOrThrow<NPC>("AnyNPCs"),
+            Utils.GetMethodOrThrow<NPC>("CountNPCS"),
+            Utils.GetMethodOrThrow<NPC>("AnyDanger"),
+
+            Utils.GetMethodOrThrow<WorldGen>("SolidTile", [typeof(int), typeof(int), typeof(bool)]),
+            Utils.GetMethodOrThrow<Collision>("SolidTiles", [typeof(int), typeof(int), typeof(int), typeof(int)]),
+
+            Utils.GetMethodOrThrow(typeof(RuntimeHelpers), "InitializeArray"),
+        ];
+
+        RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, stackStateVar, tempIntVar, entryJumps, allowFields, allowMethods);
 
         randomRewriter.RewriteRandomCalls(c, stack, allowUnknownPatterns);
 
@@ -96,6 +148,44 @@ public class SpawnAnNPCRewriter
             throw new Exception($"Found Main.rand reference at IL_{c.Next!.Offset:x4}, should have none left");
         }
 
+        RewriteSpawnNPCCalls(c, contextParam, stack);
+        RewriteOldArgAccessors(c, contextParam);
+
+        il.FancyPrintout();
+
+        VerifyNoSideEffects(c, allowFields, allowMethods, stack);
+
+        localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
+
+        c.Index = 0;
+
+        c.Emit(OpCodes.Ldnull);
+        c.Emit(OpCodes.Stloc, randomParamVar);
+
+        c.Emit(OpCodes.Ldarga, entryParam);
+        c.Emit<int?>(OpCodes.Call, "get_HasValue");
+        c.Emit(OpCodes.Brfalse, mainEntryLabel);
+
+        c.Emit(OpCodes.Ldarga, entryParam);
+        c.Emit<int?>(OpCodes.Call, "get_Value");
+        nodeSwitchIndex = c.Index;
+
+        c.Emit(OpCodes.Switch, entryJumps.ToArray());
+        c.Emit(OpCodes.Ret);
+        c.MarkLabel(mainEntryLabel);
+
+        il.Method.Parameters.Clear();
+        il.Method.Parameters.Add(entryParam);
+        il.Method.Parameters.Add(contextParam);
+
+        il.Body.Variables.Add(stopVar);
+        il.Body.Variables.Add(randomParamVar);
+        il.Body.Variables.Add(stackStateVar);
+        il.Body.Variables.Add(tempIntVar);
+    }
+
+    static void RewriteSpawnNPCCalls(ILCursor c, ParameterDefinition contextParam, StackAnalysis stack)
+    {
         c.Index = 0;
 
         ulong unknownSpawns = 0;
@@ -123,7 +213,7 @@ public class SpawnAnNPCRewriter
             thisLoadInstr.OpCode = OpCodes.Ldarg;
             thisLoadInstr.Operand = contextParam;
 
-            if (SpawnAnalyzer.MatchInstructions(il, c.Index - 6, out _,
+            if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 6, out _,
                 x => x.MatchLdcI4(out _),
                 x => x.MatchLdcR4(out _),
                 x => x.MatchLdcR4(out _),
@@ -156,7 +246,7 @@ public class SpawnAnNPCRewriter
             {
                 c.Remove();
             }
-            else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
+            else if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index, out _,
                 x => x.MatchDup(),
                 x => x.MatchLdfld<NPC>("timeLeft"),
                 x => x.MatchLdcI4(out _),
@@ -167,7 +257,7 @@ public class SpawnAnNPCRewriter
                 // TODO: register somewhere that spawned NPC has more time
                 c.RemoveRange(5);
             }
-            else if (SpawnAnalyzer.MatchInstructions(il, c.Index, out _,
+            else if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index, out _,
                 x => x.MatchLdcI4(out _),
                 x => x.MatchCallOrCallvirt<NPC>("TargetClosest")
             ))
@@ -190,7 +280,10 @@ public class SpawnAnNPCRewriter
             double done = (double)knownSpawns / totalSpawns;
             throw new Exception($"{done * 100:0.0}% ({knownSpawns}/{totalSpawns}) of SpawnNPC calls patched");
         }
+    }
 
+    static void RewriteOldArgAccessors(ILCursor c, ParameterDefinition contextParam)
+    {
         c.Index = 0;
 
         int arg = 0;
@@ -222,7 +315,7 @@ public class SpawnAnNPCRewriter
                     c.Next!.Operand = null;
                     continue;
                 }
-                else 
+                else
                     throw new NotImplementedException($"ldarg {arg} at IL_{c.Next!.Offset:x4}");
             }
 
@@ -234,34 +327,109 @@ public class SpawnAnNPCRewriter
             c.Next = oldInstruction;
             c.Remove();
         }
+    }
 
-        localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
+    static void VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, StackAnalysis stack)
+    {
+        int sideEffects = 0;
 
         c.Index = 0;
 
-        c.Emit(OpCodes.Ldnull);
-        c.Emit(OpCodes.Stloc, randomParamVar);
+        while (c.TryGotoNext(
+            x=>OutsideWritingOpcodes.Contains(x.OpCode)
+        ))
+        {
+            if (c.Next!.Operand is MethodReference method)
+            {
+                MethodBase resolved = method.ResolveReflection();
 
-        c.Emit(OpCodes.Ldarga, entryParam);
-        c.Emit<int?>(OpCodes.Call, "get_HasValue");
-        c.Emit(OpCodes.Brfalse, mainEntryLabel);
+                Type? declaringType = resolved.DeclaringType;
+                if (declaringType is not null)
+                {
+                    if (
+                        declaringType == typeof(Math) 
+                     || declaringType == typeof(MathF)
+                     || (declaringType.IsGenericType && declaringType.GetGenericTypeDefinition() == typeof(List<>))
+                     || declaringType.IsArray
+                    )
+                    {
+                        continue;
+                    }
+                }
 
-        c.Emit(OpCodes.Ldarga, entryParam);
-        c.Emit<int?>(OpCodes.Call, "get_Value");
-        nodeSwitchIndex = c.Index;
+                if (allowMethods.Any(m => m == resolved))
+                {
+                    continue;
+                }
 
-        c.Emit(OpCodes.Switch, entryJumps.ToArray());
-        c.Emit(OpCodes.Ret);
-        c.MarkLabel(mainEntryLabel);
+                if (method.Name.StartsWith("get_") 
+                 && resolved.DeclaringType is not null 
+                 && resolved.DeclaringType.GetProperty(method.Name[4..], (BindingFlags)(-1)) is not null
+                )
+                {
+                    continue;
+                }
+            }
 
-        il.Method.Parameters.Clear();
-        il.Method.Parameters.Add(entryParam);
-        il.Method.Parameters.Add(contextParam);
+            if (c.Next!.Operand is FieldReference field && allowFields.Any(field.Is))
+            {
+                continue;
+            }
 
-        il.Body.Variables.Add(stopVar);
-        il.Body.Variables.Add(randomParamVar);
-        il.Body.Variables.Add(stackStateVar);
-        il.Body.Variables.Add(tempIntVar);
+            if (StelemOpcodes.Contains(c.Next.OpCode))
+            {
+                InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
+                if (info is not null)
+                {
+                    StackValue inputArray = info.inValues[^3];
+                    if (inputArray.producedBy.Count == 1)
+                    {
+                        Instruction producer = inputArray.producedBy[0];
+                        bool ok = false;
+                        while (true) {
+                            if (c.Instrs.IndexOf(producer) < 0) 
+                                break;
+                            
+                            if (producer.OpCode == OpCodes.Newarr)
+                            {
+                                ok = true;
+                                break;
+                            }
+
+                            if (producer.OpCode == OpCodes.Dup)
+                            {
+                                InstructionStackInfo? dupInfo = stack.LookupInstruction(producer, out _);
+                                if (dupInfo is null)
+                                    break;
+                                
+                                StackValue inputValue = dupInfo.inValues[^1];
+                                if (inputValue.producedBy.Count != 1)
+                                    break;
+
+                                producer = inputValue.producedBy[0];
+                                continue;
+                            }
+
+                            break;
+                        }
+
+                        if (ok)
+                            continue;
+                    }
+                }
+
+            }
+
+            sideEffects++;
+
+            Console.Write($"Found side-effect instruction [{c.Index:00000}] ");
+            AssemblyPrint.Print(c.Next);
+            Console.WriteLine();
+        }
+
+
+        if (sideEffects > 0)
+            throw new Exception($"{sideEffects} instructions with side-effects detected");
     }
 }
 
