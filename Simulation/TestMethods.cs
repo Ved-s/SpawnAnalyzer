@@ -360,19 +360,46 @@ public static class TestMethods
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 46, 0, 0f, 0f, 0f, 0f, 255);
     }
 
+    public static TestNode[] TestMethod8ExpectedTestResults = [
+        new([ // 0
+            (1f/2, [624], null),
+            (1f/2, [], 1),
+        ]),
+
+        new([ // 1
+            (1f/NPC.goldCritterChance, [443], null),
+            (1 - (1f/NPC.goldCritterChance), [], 2),
+        ]),
+
+        new([ // 2
+            (1f/NPC.goldCritterChance, [539], null),
+            (1 - (1f/NPC.goldCritterChance), [], 3),
+        ]),
+
+        new([ // 3
+            (1f/3, [], 4),
+            (2f/3, [46], null),
+        ]),
+
+        new([ // 4
+            (1f/2, [299], null),
+            (1f/2, [538], null),
+        ]),
+    ];
+
     public static void TestMethod8(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
     {
-        if (spawner.RollLuck(2) == 0)
+        if (spawner.RollLuck(2) == 0) // 0
         {
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 624, 0, 0f, 0f, 0f, 0f, 255).timeLeft *= 10;
             return;
         }
-        if (spawner.RollLuck(NPC.goldCritterChance) == 0)
+        if (spawner.RollLuck(NPC.goldCritterChance) == 0) // 1
         {
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 443, 0, 0f, 0f, 0f, 0f, 255);
             return;
         }
-        if (spawner.RollLuck(NPC.goldCritterChance) == 0)
+        if (spawner.RollLuck(NPC.goldCritterChance) == 0) // 2
         {
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 539, 0, 0f, 0f, 0f, 0f, 255);
             return;
@@ -392,9 +419,9 @@ public static class TestMethods
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 540, 0, 0f, 0f, 0f, 0f, 255);
             return;
         }
-        if (Main.rand.Next(3) == 0)
+        if (Main.rand.Next(3) == 0) // 3
         {
-            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, (int)Utils.SelectRandom<short>(Main.rand, new short[] { 299, 538 }), 0, 0f, 0f, 0f, 0f, 255);
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, (int)Utils.SelectRandom<short>(Main.rand, new short[] { 299, 538 }), 0, 0f, 0f, 0f, 0f, 255); // 4
             return;
         }
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 46, 0, 0f, 0f, 0f, 0f, 255);
