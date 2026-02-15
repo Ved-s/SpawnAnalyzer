@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -44,10 +45,15 @@ public class SpawnAnalyzer
     {
         Player.Hooks.OnEnterWorld += (_) => AnalyzeInTicks = 10;
 
-        MainUpdateHook                   = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
-        MainDrawMouseOverHook            = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
+        MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
+        MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
-        
+
+        SelfTest();
+
+        Environment.Exit(1);
+
+
         Stopwatch sw = Stopwatch.StartNew();
         var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);
         sw.Stop();
@@ -258,6 +264,184 @@ public class SpawnAnalyzer
         Console.WriteLine($"Chances add up to {chancesAdd * 100:0.000}%\n");
 
         Environment.Exit(1);
+    }
+
+    public static bool SelfTest()
+    {
+        bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimRandomNode?> simNodes, bool report, int depth, ref int faildepth)
+        {
+            TestMethods.TestNode testnode = testNodes[testindex];
+            SimRandomNode? simnode = simNodes[simindex];
+
+            if (simnode is null)
+            {
+                faildepth = depth;
+                if (report)
+                    Console.WriteLine($"Self-test {testid} fail at results: Expected simulation node {simindex} to be populated");
+                return false;
+            }
+
+            var branches = simnode.timelines[simtimeline].branches.ToList();
+
+            if (branches.Count != testnode.branches.Length)
+            {
+                faildepth = depth;
+                if (report)
+                    Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} sim {simindex}/{simtimeline}) Expected {testnode.branches.Length} branches, got {branches.Count}");
+                return false;
+            }
+
+            for (int i = 0; i < testnode.branches.Length; i++)
+            {
+                (float, int[], int?) branch = testnode.branches[i];
+
+                int? foundIndex = null;
+
+                int maxFailDepth = 0;
+                int? maxFailIndex = null;
+
+                for (int j = 0; j < branches.Count; j++)
+                {
+                    var n = branches[j];
+
+                    if (branch.Item1 - 0.005f > n.info.chance || branch.Item1 + 0.005f < n.info.chance)
+                        continue;
+
+                    if (branch.Item2.Length > 0)
+                    {
+                        if ((n.spawns?.Count ?? 0) != branch.Item2.Length)
+                        {
+                            continue;
+                        }
+
+                        bool spawnsOk = true;
+                        foreach (var (a, b) in n.spawns!.Zip(branch.Item2))
+                        {
+                            if (a.npcId != b)
+                            {
+                                spawnsOk = false;
+                                break;
+                            }
+                        }
+                        if (!spawnsOk)
+                            continue;
+                    }
+
+                    if (branch.Item3 is not null)
+                    {
+                        if (n.nextNode is null)
+                        {
+                            continue;
+                        }
+
+                        int newfaildepth = 0;
+
+                        if (!MatchNode(testid, branch.Item3.Value, n.nextNode.node, n.nextNode.timeline, testNodes, simNodes, false, depth+1, ref newfaildepth))
+                        {
+                            if (newfaildepth > maxFailDepth)
+                            {
+                                maxFailDepth = newfaildepth;
+                                maxFailIndex = j;
+                            }
+                            continue;
+                        }
+                    }
+
+                    foundIndex = j;
+                    break;
+                }
+
+                if (foundIndex is not null)
+                {
+                    branches.RemoveAt(foundIndex.Value);
+                }
+                else
+                {
+                    if (maxFailIndex is null)
+                    {
+                        faildepth = depth;
+                        if (report)
+                            Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} sim {simindex}/{simtimeline}) Failed to match test branch {i}");
+                        return false;
+                    }
+                    else
+                    {
+                        var n = branches[maxFailIndex.Value];
+                        if (report)
+                            MatchNode(testid, branch.Item3!.Value, n.nextNode!.node, n.nextNode.timeline, testNodes, simNodes, true, depth+1, ref faildepth);
+                        faildepth = depth;
+                        return false;
+                    }
+                }
+            }
+        
+            return true;
+        }
+
+        bool ok = true;
+        for (int i = 1; ; i++)
+        {
+            MethodInfo? testMethod = TestMethods.GetTestMethodInfo(i);
+            if (testMethod is null)
+            {
+                break;
+            }
+
+            SpawnAnNPCRewriteData d;
+            try
+            {
+                d = SpawnAnNPCRewriter.RewriteMethod(testMethod, false);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Self-test {i} fail at rewrite: {e}");
+                ok = false;
+                continue;
+            }
+
+#pragma warning disable SYSLIB0050 // Type or member is obsolete
+            var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
+#pragma warning restore SYSLIB0050 // Type or member is obsolete
+
+            int x = 100;
+            int y = 100;
+            int tileType = TileID.Grass;
+
+            SpawnSimulationContext ctx = new SpawnSimulationContext(d, spawner, x, y, tileType, false);
+
+            SimulationResult? simulationResult;
+
+            try
+            {
+                simulationResult = ctx.Simulate() ?? throw new NullReferenceException("Simulate returned null");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Self-test {i} fail at simulation: {e}");
+                ok = false;
+                continue;
+            }
+
+            TestMethods.TestNode[]? testData = TestMethods.GetExpectedTestResults(i);
+
+            if (testData is null)
+            {
+                Console.WriteLine($"Self-test {i} ran, no test data to verify results");
+                continue;
+            }
+
+
+            int faildepth = 0;
+            if (!MatchNode(i, 0, simulationResult.Value.startNode, 0, testData, simulationResult.Value.nodes, true, 0, ref faildepth))
+            {
+                ok = false;
+                continue;
+            }
+
+            Console.WriteLine($"Self-test {i} pass");
+        }
+
+        return ok;
     }
 
     delegate void SpawnAnNPC(int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target);
