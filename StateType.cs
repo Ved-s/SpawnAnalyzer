@@ -64,7 +64,7 @@ public class StateType
         return new StateType(type, eq, clone);
     }
 
-    private static Func<object, object, bool> GenerateEqMethod(Type type)
+    public static Func<object, object, bool> GenerateEqMethod(Type type)
     {
         ParameterExpression param1 = Expression.Parameter(typeof(object));
         ParameterExpression param2 = Expression.Parameter(typeof(object));
@@ -88,6 +88,9 @@ public class StateType
 
         foreach (FieldInfo field in type.GetFields())
         {
+            if (field.IsStatic)
+                continue;
+                
             Expression neq;
 
             if (EqMethods.TryGetValue(field.FieldType, out MethodInfo? eqMethod))
@@ -126,7 +129,7 @@ public class StateType
         return Expression.Lambda<Func<object, object, bool>>(block, [param1, param2]).Compile();
     }
 
-    private static Func<object, object> GenerateCloneMethod(Type type)
+    public static Func<object, object> GenerateCloneMethod(Type type)
     {
         ParameterExpression param = Expression.Parameter(typeof(object));
 
@@ -160,6 +163,9 @@ public class StateType
 
         foreach (FieldInfo field in type.GetFields())
         {
+            if (field.IsStatic)
+                continue;
+
             Expression value;
 
             if (CloneMethods.TryGetValue(field.FieldType, out MethodInfo? cloneMethod))

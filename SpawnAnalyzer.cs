@@ -18,8 +18,9 @@ using Terraria.UI;
 
 namespace SpawnAnalyzer;
 
-// TODO: nodes for inputs with chances
+// TODO: warning about side-effects and inconsistent chances, hook Spawner.SpawnNPC and NPC.NewNPC to catch unwanted spawns
 // TODO: no side effects in the simulated function
+// TODO: nodes for inputs with chances
 
 // TODO: nodes for NPCCount
 // TODO: better selftests?
@@ -33,7 +34,7 @@ public class SpawnAnalyzer
     internal delegate bool GetSpawnTileParams(NPC.Spawner spawner, Player player, ref int x, ref int y, Rectangle spawnArea, Rectangle safeArea, out SpawnParamsStage1 spawnParams);
     internal static readonly GetSpawnTileParams GetSpawnTileParamsImpl = GetSpawnTileParamsRewriter.GenerateMethod();
 
-    internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, ref SpawnParamsStage2 spawnParams);
+    internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, ref SpawnerChances spawnParams);
     internal static readonly SetSpawnFlagsForChosenTile SetSpawnFlagsForChosenTileImpl = SetSpawnFlagsForChosenTileRewriter.GenerateMethod();
 
     internal static Hook? MainUpdateHook;
@@ -49,6 +50,10 @@ public class SpawnAnalyzer
         MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
 
+        SelfTest();
+
+        Environment.Exit(1);
+
         Stopwatch sw = Stopwatch.StartNew();
         var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);
         sw.Stop();
@@ -62,7 +67,9 @@ public class SpawnAnalyzer
         int y = 100;
         int tileType = TileID.Grass;
 
-        var ctx = new SpawnSimulationContext(d, spawner, x, y, tileType, false);
+        SpawnerChances chances = SpawnerChances.WithValuesFrom(spawner);
+
+        var ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, false);
 
         Main.tile = new Tile[500, 500];
 
@@ -261,12 +268,12 @@ public class SpawnAnalyzer
         Environment.Exit(1);
     }
 
-    public static bool SelfTest()
+    public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false)
     {
-        bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimRandomNode?> simNodes, bool report, int depth, ref int faildepth)
+        bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimulationNode?> simNodes, bool report, int depth, ref int faildepth)
         {
             TestMethods.TestNode testnode = testNodes[testindex];
-            SimRandomNode? simnode = simNodes[simindex];
+            SimulationNode? simnode = simNodes[simindex];
 
             if (simnode is null)
             {
@@ -331,7 +338,7 @@ public class SpawnAnalyzer
 
                         int newfaildepth = 0;
 
-                        if (!MatchNode(testid, branch.Item3.Value, n.nextNode.node, n.nextNode.timeline, testNodes, simNodes, false, depth+1, ref newfaildepth))
+                        if (!MatchNode(testid, branch.Item3.Value, n.nextNode.node, n.nextNode.timeline, testNodes, simNodes, false, depth + 1, ref newfaildepth))
                         {
                             if (newfaildepth > maxFailDepth)
                             {
@@ -363,18 +370,19 @@ public class SpawnAnalyzer
                     {
                         var n = branches[maxFailIndex.Value];
                         if (report)
-                            MatchNode(testid, branch.Item3!.Value, n.nextNode!.node, n.nextNode.timeline, testNodes, simNodes, true, depth+1, ref faildepth);
+                            MatchNode(testid, branch.Item3!.Value, n.nextNode!.node, n.nextNode.timeline, testNodes, simNodes, true, depth + 1, ref faildepth);
                         faildepth = depth;
                         return false;
                     }
                 }
             }
-        
+
             return true;
         }
 
         bool ok = true;
-        for (int i = 1; ; i++)
+        int startTest = specificTest ?? 1;
+        for (int i = startTest; specificTest is null || i == specificTest; i++)
         {
             MethodInfo? testMethod = TestMethods.GetTestMethodInfo(i);
             if (testMethod is null)
@@ -385,7 +393,7 @@ public class SpawnAnalyzer
             SpawnAnNPCRewriteData d;
             try
             {
-                d = SpawnAnNPCRewriter.RewriteMethod(testMethod, false);
+                d = SpawnAnNPCRewriter.RewriteMethod(testMethod, false, ilprintout);
             }
             catch (Exception e)
             {
@@ -402,9 +410,13 @@ public class SpawnAnalyzer
             int y = 100;
             int tileType = TileID.Grass;
 
-            SpawnSimulationContext ctx = new SpawnSimulationContext(d, spawner, x, y, tileType, false);
+            SpawnerChances chances = SpawnerChances.WithValuesFrom(spawner);
 
-            SimulationResult? simulationResult;
+            SpawnSimulationContext ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, false);
+
+            TestMethods.PrepareSimulationForTest(i, ctx);
+
+            SimulationResult simulationResult;
 
             try
             {
@@ -417,6 +429,80 @@ public class SpawnAnalyzer
                 continue;
             }
 
+            if (printNodes)
+            {
+                for (int j = 0; j < simulationResult.nodes.Count; j++)
+                {
+                    var node = simulationResult.nodes[j];
+                    if (node is null)
+                    {
+                        continue;
+                    }
+
+                    SimulationNodeInfo nodeInfo = d.Nodes[j];
+                    if (simulationResult.startNode == j)
+                    {
+                        Console.WriteLine($"Node {j} [{nodeInfo.node.GetType().Name} at IL_{nodeInfo.Offset:x4}] (start): ");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Node {j} [{nodeInfo.node.GetType().Name} at IL_{nodeInfo.Offset:x4}]: ");
+                    }
+
+                    for (int t = 0; t < node.timelines.Count; t++)
+                    {
+
+                        Console.WriteLine($"  Timeline {t}:");
+                        var timeline = node.timelines[t];
+                        foreach (var branch in timeline.branches)
+                        {
+                            string ps = $"   [{branch.info.chance * 100:.0}%] -> ";
+                            Console.Write(ps);
+
+                            bool firstline = true;
+
+                            if (branch.spawns is not null)
+                            {
+                                foreach (var spawn in branch.spawns)
+                                {
+                                    if (!firstline)
+                                    {
+                                        Console.WriteLine(",");
+                                        for (int k = 0; k < ps.Length; k++)
+                                        {
+                                            Console.Write(' ');
+                                        }
+                                    }
+                                    firstline = false;
+                                    Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
+                                }
+                            }
+
+                            if (branch.nextNode is not null)
+                            {
+                                if (!firstline)
+                                {
+                                    Console.WriteLine(",");
+                                    for (int k = 0; k < ps.Length; k++)
+                                    {
+                                        Console.Write(' ');
+                                    }
+                                }
+                                firstline = false;
+
+                                Console.Write($"Node {branch.nextNode!.node}/{branch.nextNode!.timeline}");
+                            }
+
+                            if (firstline)
+                            {
+                                Console.Write($"Nothing");
+                            }
+                            Console.WriteLine();
+                        }
+                    }
+                }
+            }
+
             TestMethods.TestNode[]? testData = TestMethods.GetExpectedTestResults(i);
 
             if (testData is null)
@@ -427,7 +513,7 @@ public class SpawnAnalyzer
 
 
             int faildepth = 0;
-            if (!MatchNode(i, 0, simulationResult.Value.startNode, 0, testData, simulationResult.Value.nodes, true, 0, ref faildepth))
+            if (!MatchNode(i, 0, simulationResult.startNode, 0, testData, simulationResult.nodes, true, 0, ref faildepth))
             {
                 ok = false;
                 continue;

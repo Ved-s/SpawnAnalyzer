@@ -54,7 +54,7 @@ public class SpawnAnNPCRewriter
 
         ..StelemOpcodes
     ];
-    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true)
+    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true, bool printoutAfter = false)
     {
         MethodInfo method = methodOverride ?? Utils.GetMethodOrThrow<NPC.Spawner>("SpawnAnNPC",
             [
@@ -86,11 +86,28 @@ public class SpawnAnNPCRewriter
             }
         }
 
-        // var stack = StackAnalyzer.Analyze(il);
-        // il.FancyPrintout(stack.instructions);
+        if (printoutAfter)
+        {
+            StackAnalysis? stack = null;
+            Exception? stackException = null;
+            try
+            {
+                stack = StackAnalyzer.Analyze(il);
+            }
+            catch (Exception e)
+            {
+                stackException = e;
+            }
+            
 
-        // Console.WriteLine("Rewrite OK");
-        // Console.WriteLine();
+            il.FancyPrintout(stack?.instructions);
+
+            if (stackException is not null)
+            {
+                Console.WriteLine($"Stack analysis exception: {stackException}");
+            }
+            
+        }
 
         DMDHack.SetNullOriginalMethod(dmd);
 
@@ -110,6 +127,7 @@ public class SpawnAnNPCRewriter
         VariableDefinition randomParamVar = new(il.Import(typeof(object)));
         VariableDefinition stackStateVar = new(il.Import(typeof(object)));
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
+        VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
 
@@ -124,6 +142,7 @@ public class SpawnAnNPCRewriter
             Utils.GetMethodOrThrow<SpawnSimulationContext>("NodeHit"),
             Utils.GetMethodOrThrow<SpawnSimulationContext>("ExitNodeHit"),
             Utils.GetMethodOrThrow<SpawnSimulationContext>("GetLastNodeStackStateClone"),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>("GetCurrentTimelineState"),
 
             Utils.GetMethodOrThrow<NPC>("AnyNPCs"),
             Utils.GetMethodOrThrow<NPC>("CountNPCS"),
@@ -135,9 +154,15 @@ public class SpawnAnNPCRewriter
             Utils.GetMethodOrThrow(typeof(RuntimeHelpers), "InitializeArray"),
         ];
 
-        RandomCallRewriter randomRewriter = new(nodes, contextParam, stopVar, randomParamVar, stackStateVar, tempIntVar, entryJumps, allowFields, allowMethods);
+        NodeRewriter nodeRewriter = new(
+            nodes, contextParam,
+            stopVar, randomParamVar, stackStateVar, tempIntVar, tempNullBoolVar,
+            entryJumps, 
+            allowFields, allowMethods, 
+            stack
+        );
 
-        randomRewriter.RewriteRandomCalls(c, stack, allowUnknownPatterns);
+        nodeRewriter.RewriteNodes(c, allowUnknownPatterns);
 
         c.Index = 0;
 
@@ -150,10 +175,7 @@ public class SpawnAnNPCRewriter
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
         RewriteOldArgAccessors(c, contextParam);
-
-        il.FancyPrintout();
-
-        VerifyNoSideEffects(c, allowFields, allowMethods, stack);
+        VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
 
         localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 
@@ -182,6 +204,7 @@ public class SpawnAnNPCRewriter
         il.Body.Variables.Add(randomParamVar);
         il.Body.Variables.Add(stackStateVar);
         il.Body.Variables.Add(tempIntVar);
+        il.Body.Variables.Add(tempNullBoolVar);
     }
 
     static void RewriteSpawnNPCCalls(ILCursor c, ParameterDefinition contextParam, StackAnalysis stack)
@@ -329,7 +352,7 @@ public class SpawnAnNPCRewriter
         }
     }
 
-    static void VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, StackAnalysis stack)
+    static bool VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, StackAnalysis? stack, bool nested)
     {
         int sideEffects = 0;
 
@@ -369,6 +392,14 @@ public class SpawnAnNPCRewriter
                 {
                     continue;
                 }
+
+                DynamicMethodDefinition dmd = new(resolved);
+                ILContext ilc = new(dmd.Definition);
+
+                if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, null, true))
+                {
+                    continue;
+                }
             }
 
             if (c.Next!.Operand is FieldReference field && allowFields.Any(field.Is))
@@ -376,7 +407,7 @@ public class SpawnAnNPCRewriter
                 continue;
             }
 
-            if (StelemOpcodes.Contains(c.Next.OpCode))
+            if (StelemOpcodes.Contains(c.Next.OpCode) && stack is not null)
             {
                 InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
                 if (info is not null)
@@ -420,16 +451,23 @@ public class SpawnAnNPCRewriter
 
             }
 
+            if (nested) 
+                return false;
+
             sideEffects++;
 
             Console.Write($"Found side-effect instruction [{c.Index:00000}] ");
             AssemblyPrint.Print(c.Next);
             Console.WriteLine();
         }
-
+        
+        if (nested)
+            return sideEffects == 0;
 
         if (sideEffects > 0)
             throw new Exception($"{sideEffects} instructions with side-effects detected");
+
+        return true;
     }
 }
 

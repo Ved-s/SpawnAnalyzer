@@ -38,7 +38,7 @@ class SetSpawnFlagsForChosenTileRewriter
 
     static void RewriteMethod(ILContext il)
     {
-        TypeReference spawnParams2RefType = il.Import(typeof(SpawnParamsStage2).MakeByRefType());
+        TypeReference spawnParams2RefType = il.Import(typeof(SpawnerChances).MakeByRefType());
 
         ParameterDefinition spawnParamsParam = new("spawnParams", Mono.Cecil.ParameterAttributes.None, spawnParams2RefType);
 
@@ -142,7 +142,7 @@ class SetSpawnFlagsForChosenTileRewriter
             c.Emit(OpCodes.Ldarg_2);
             c.Emit(OpCodes.Ldc_I4, i);
             c.Emit(OpCodes.Ldarg, spawnParamsParam);
-            c.Emit<SpawnParamsStage2>(OpCodes.Ldflda, field + "Chance");
+            c.Emit<SpawnerChances>(OpCodes.Ldflda, field + "Chance");
             c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CalculateChanceForSpidersAndDeserts));
         }
 
@@ -186,7 +186,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 throw new Exception($"Ocean/beach chance matcher {i} fail");
             }
 
-            FieldReference chanceField = new(field.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnParamsStage2)));
+            FieldReference chanceField = new(field.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnerChances)));
 
             c.RemoveRange(7);
             c.Emit(OpCodes.Ldarg, spawnParamsParam);
@@ -201,7 +201,7 @@ class SetSpawnFlagsForChosenTileRewriter
 
         // Replace this.field = X; with spawnParams.fieldChance = X;
         List<string> overriddenChanceFieldNames = [];
-        foreach (FieldInfo field in typeof(SpawnParamsStage2).GetFields())
+        foreach (FieldInfo field in typeof(SpawnerChances).GetFields())
         {
             if (field.IsStatic || !field.Name.EndsWith("Chance") || field.FieldType != typeof(float))
                 continue;
@@ -210,7 +210,7 @@ class SetSpawnFlagsForChosenTileRewriter
             FieldInfo? spawnerField = typeof(NPC.Spawner).GetField(spawnerFieldName, (BindingFlags)(-1));
             if (spawnerField is null)
             {
-                throw new Exception($"{nameof(SpawnParamsStage2)}.{field.Name} doesn't have a corresponding Spawner field!");
+                throw new Exception($"{nameof(SpawnerChances)}.{field.Name} doesn't have a corresponding Spawner field!");
             }
 
             if (spawnerField.FieldType != typeof(bool))
@@ -248,7 +248,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 c.Next.OpCode = OpCodes.Ldc_R4;
                 c.Next.Operand = (float)fieldValue;
                 c.Index += 1;
-                c.Next.Operand = new FieldReference(replaceField.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnParamsStage2)));
+                c.Next.Operand = new FieldReference(replaceField.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnerChances)));
             }
             else
             {
@@ -269,7 +269,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 c.Emit(OpCodes.Pop);
                 c.Emit(OpCodes.Ldarg, spawnParamsParam);
                 c.Emit(OpCodes.Ldloc, tempFloat);
-                c.Emit<SpawnParamsStage2>(OpCodes.Stfld, replaceField.Name + "Chance");
+                c.Emit<SpawnerChances>(OpCodes.Stfld, replaceField.Name + "Chance");
             }
         }
 
@@ -650,7 +650,7 @@ class SetSpawnFlagsForChosenTileRewriter
         int xStepStart, int xStepEnd,
         int yStepStart, int yStepEnd,
         int width,
-        ref SpawnParamsStage2 p2
+        ref SpawnerChances p2
     )
     {
         if (p2.nearGraniteChance >= 1 && p2.nearMarbleChance >= 1)
@@ -1166,7 +1166,7 @@ class SetSpawnFlagsForChosenTileRewriter
         c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CalculateSurfaceSpawnAndDaytimeForRemixChances));
     }
 
-    static void CalculateSurfaceSpawnAndDaytimeForRemixChances(bool firstCondition, bool secondCondition, ref SpawnParamsStage2 p2)
+    static void CalculateSurfaceSpawnAndDaytimeForRemixChances(bool firstCondition, bool secondCondition, ref SpawnerChances p2)
     {
         // TODO: dependent percent rules
         if (firstCondition)

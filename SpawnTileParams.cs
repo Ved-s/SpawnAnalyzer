@@ -38,7 +38,7 @@ public struct SpawnParamsStage1
     }
 }
 
-public struct SpawnParamsStage2
+public class SpawnerChances
 {
     public float nearMarbleChance;
     public float nearGraniteChance;
@@ -50,47 +50,47 @@ public struct SpawnParamsStage2
     public float surfaceSpawnChance;
     public float dayTimeChance;
 
-    readonly static Func<NPC.Spawner, SpawnParamsStage2> InitFromSpawnerImpl = GenerateInitFromSpawnerMethod();
+    readonly static Func<NPC.Spawner, SpawnerChances> InitFromSpawnerImpl = GenerateInitFromSpawnerMethod();
 
-    public static SpawnParamsStage2 WithValuesFrom(NPC.Spawner spawner)
+    public static SpawnerChances WithValuesFrom(NPC.Spawner spawner)
     {
         return InitFromSpawnerImpl(spawner);
     }
 
-    static Func<NPC.Spawner, SpawnParamsStage2> GenerateInitFromSpawnerMethod()
+    static Func<NPC.Spawner, SpawnerChances> GenerateInitFromSpawnerMethod()
     {
-        DynamicMethodDefinition dmd = new("CopyChanceValuesFromSpawner", typeof(SpawnParamsStage2), [typeof(NPC.Spawner)]);
+        DynamicMethodDefinition dmd = new("CopyChanceValuesFromSpawner", typeof(SpawnerChances), [typeof(NPC.Spawner)]);
 
         ILProcessor il = dmd.GetILProcessor();
-        VariableDefinition structVar = new(il.Import(typeof(SpawnParamsStage2)));
-        il.Body.Variables.Add(structVar);
+        VariableDefinition retultVar = new(il.Import(typeof(SpawnerChances)));
+        il.Body.Variables.Add(retultVar);
 
-        il.Emit(OpCodes.Ldloca, structVar);
-        il.Emit(OpCodes.Initobj, il.Import(typeof(SpawnParamsStage2)));
+        il.Emit(OpCodes.Newobj, il.Import(typeof(SpawnerChances).GetConstructor([]) ?? throw new MissingMethodException("SpawnerChances ctor")));
+        il.Emit(OpCodes.Stloc, retultVar);
 
-        foreach (FieldInfo field in typeof(SpawnParamsStage2).GetFields())
+        foreach (FieldInfo field in typeof(SpawnerChances).GetFields())
         {
             if (field.IsStatic || !field.Name.EndsWith("Chance") || field.FieldType != typeof(float))
                 continue;
 
-            string spawnerFieldName = field.Name.Substring(0, field.Name.Length - 6);
+            string spawnerFieldName = field.Name[..^6];
             FieldInfo? spawnerField = typeof(NPC.Spawner).GetField(spawnerFieldName, (BindingFlags)(-1));
             if (spawnerField is null || spawnerField.IsStatic || spawnerField.FieldType != typeof(bool))
                 continue;
 
             Convert.ToSingle(true);
 
-            il.Emit(OpCodes.Ldloca, structVar);
+            il.Emit(OpCodes.Ldloc, retultVar);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, il.Import(spawnerField));
             il.Emit(OpCodes.Conv_R4);
             il.Emit(OpCodes.Stfld, il.Import(field));
         }
 
-        il.Emit(OpCodes.Ldloc, structVar);
+        il.Emit(OpCodes.Ldloc, retultVar);
         il.Emit(OpCodes.Ret);
 
         MethodInfo method = dmd.Generate();
-        return method.CreateDelegate<Func<NPC.Spawner, SpawnParamsStage2>>();
+        return method.CreateDelegate<Func<NPC.Spawner, SpawnerChances>>();
     }
 }

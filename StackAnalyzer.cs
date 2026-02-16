@@ -597,7 +597,7 @@ public class StackAnalyzer
     static void MergeStackValues(List<StackValue> into, List<StackValue> from, List<InstructionStackInfo> infos, Instruction at)
     {
         if (into.Count != from.Count)
-            Console.WriteLine($"Merging two stacks of different size {from.Count} -> {into.Count} at IL_{at.Offset:x4}");
+            throw new InvalidProgramException($"Merging two stacks of different size {from.Count} -> {into.Count} at IL_{at.Offset:x4}");
 
         for (int i = 0; i < Math.Min(into.Count, from.Count); i++)
         {

@@ -23,6 +23,11 @@ public static class TestMethods
         return typeof(TestMethods).GetField($"TestMethod{number}ExpectedTestResults", (BindingFlags)(-1))?.GetValue(null) as TestNode[];
     }
 
+    public static void PrepareSimulationForTest(int number, SpawnSimulationContext ctx)
+    {
+        typeof(TestMethods).GetMethod($"TestMethod{number}InitSimulation", (BindingFlags)(-1))?.Invoke(null, [ctx]);
+    }
+
     public class TestNode
     {
         // (chance, spawns, next)
@@ -449,6 +454,51 @@ public static class TestMethods
         }
 
         if (Main.rand.Next(100) >= 30) // 1
+        {
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 2, 0, 0f, 0f, 0f, 0f, 255);
+            return;
+        }
+    }
+
+    public static void TestMethod10InitSimulation(SpawnSimulationContext ctx)
+    {
+        ctx.chances.dayTimeChance = 0.5f;
+    }
+
+    public static TestNode[] TestMethod10ExpectedTestResults = [
+        new([ // 0
+            (0.5f, [], 1), // true
+            (0.5f, [], 2), // false
+        ]),
+        new([ // 1
+            (1f/3, [1], null),
+            (2f/3, [], null),
+        ]),
+        new([ // 2
+            (1f/3, [2], null),
+            (2f/3, [], null),
+        ]),
+    ];
+
+    public static void TestMethod10(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
+        if (spawner.dayTime        // 0
+         && Main.rand.Next(3) == 0 // 1
+        )
+        {
+            if (!spawner.dayTime) // should never be true
+            {
+                spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, -1, 0, 0f, 0f, 0f, 0f, 255);
+                return;
+            }
+
+            spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
+            return;
+        }
+
+        if (!spawner.dayTime       // 2 (dayTime = true) 3 (dayTime = false)
+         && Main.rand.Next(3) == 0 // 4
+        )
         {
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 2, 0, 0f, 0f, 0f, 0f, 255);
             return;

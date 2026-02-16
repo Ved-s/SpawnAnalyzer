@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Terraria;
 using SpawnAnalyzer.Rewriters.SpawnANnNPC;
+using Terraria.ID;
 
 namespace SpawnAnalyzer.Simulation;
 
@@ -14,8 +15,9 @@ public class SpawnSimulationContext
     public int spawnTileType;
     public bool xRange;
 
-    List<SimRandomNode?> populatedNodes = [];
-    readonly SpawnAnNPCRewriteData runData;
+    List<SimulationNode?> populatedNodes = [];
+    public readonly SpawnAnNPCRewriteData runData;
+    public readonly SpawnerChances chances;
 
     object? localState;
     public object? stackState;
@@ -26,6 +28,7 @@ public class SpawnSimulationContext
 
     public SpawnSimulationContext(
         SpawnAnNPCRewriteData runData,
+        SpawnerChances chances,
         NPC.Spawner spawner,
         int spawnTileX,
         int spawnTileY,
@@ -34,6 +37,7 @@ public class SpawnSimulationContext
     )
     {
         this.runData = runData;
+        this.chances = chances;
         this.spawner = spawner;
         this.spawnTileX = spawnTileX;
         this.spawnTileY = spawnTileY;
@@ -52,20 +56,26 @@ public class SpawnSimulationContext
             populatedNodes.Add(null);
         }
 
+        SimulationTimelineState? prevTimelineState = null;
+
         if (currentConnection is not null)
         {
             currentTimeline = 0;
+
+            prevTimelineState = populatedNodes[currentConnection.startNode]!.timelines[currentConnection.startNodeTimeline].timelineState;
+
             if (populatedNodes[index] is not null)
             {
                 var thisNode = populatedNodes[index]!;
                 bool foundEq = false;
                 for (int i = 0; i < thisNode.timelines.Count; i++)
                 {
-                    if (runData.LocalStateType.Equals(localState!, thisNode.timelines[i].localState))
+                    SimulationNodeTimeline thisNodeTimeline = thisNode.timelines[i];
+                    if (runData.LocalStateType.Equals(localState!, thisNodeTimeline.localState) && prevTimelineState.Equals(thisNodeTimeline.timelineState))
                     {
                         StateType? stackStateType = runData.Nodes[index].stackStateType;
 
-                        if (stackStateType is null || stackStateType.Equals(stackState!, thisNode.timelines[i].stackState!))
+                        if (stackStateType is null || stackStateType.Equals(stackState!, thisNodeTimeline.stackState!))
                         {
                             currentTimeline = i;
                             foundEq = true;
@@ -108,7 +118,9 @@ public class SpawnSimulationContext
                 stackStateClone = stackStateType.Clone(stackState!);
             }
 
-            var newTimeline = new SimRandomNodeTimeline(branches, rollParams, runData.LocalStateType.Clone(localState!), stackStateClone);
+            SimulationTimelineState newTimelineState = prevTimelineState?.Clone() ?? new();
+
+            var newTimeline = new SimulationNodeTimeline(branches, rollParams, runData.LocalStateType.Clone(localState!), stackStateClone, newTimelineState);
 
             populatedNodes[index]!.timelines.Add(newTimeline);
         }
@@ -118,27 +130,25 @@ public class SpawnSimulationContext
 
         var timeline = node.timelines[currentTimeline];
 
-        // int nodeOffset = runData.Nodes[index].Offset;
-
         for (int i = 0; i < timeline.branches.Length; i++)
         {
-            if (timeline.branches[i].ConnectionType != NodeConnectionType.NotExplored)
+            NodeConnection branch = timeline.branches[i];
+            if (branch.ConnectionType != NodeConnectionType.NotExplored)
             {
                 continue;
             }
 
-            int retval = timeline.branches[i].info.returnValue;
+            int retval = branch.info.returnValue;
 
-            // Console.WriteLine($"Hit node {index} (IL_{nodeOffset:x4}), return {retval}");
+            currentConnection = branch;
 
-            currentConnection = timeline.branches[i];
+            currentConnection.info.onBranchSelected?.Invoke(this);
 
             stop = false;
             return retval;
         }
 
         stop = true;
-        // Console.WriteLine($"Hit node {index} (IL_{nodeOffset:x4}), stop");
         return 0;
     }
 
@@ -167,6 +177,15 @@ public class SpawnSimulationContext
         StateType type = runData.Nodes[currentConnection!.startNode].stackStateType!;
 
         return type.Clone(state);
+    }
+
+    public SimulationTimelineState? GetCurrentTimelineState()
+    {
+        // Console.WriteLine("GetCurrentTimelineState");
+        if (currentConnection is null)
+            return null;
+        
+        return populatedNodes[currentConnection.startNode]!.timelines[currentConnection.startNodeTimeline].timelineState;
     }
 
     public SimulationResult? Simulate()
@@ -245,7 +264,7 @@ public struct SimulationResult
 {
     public int startNode;
 
-    public List<SimRandomNode?> nodes;
+    public List<SimulationNode?> nodes;
 }
 
 public class SimulationNodeInfo
@@ -254,16 +273,51 @@ public class SimulationNodeInfo
 
     public StateType? stackStateType;
 
-    public SimulationNode node;
+    public SimulationNodeImpl node;
 
-    public SimulationNodeInfo(StateType? stackStateType, SimulationNode node)
+    public SimulationNodeInfo(StateType? stackStateType, SimulationNodeImpl node)
     {
         this.stackStateType = stackStateType;
         this.node = node;
     }
 }
 
-public abstract class SimulationNode
+#pragma warning disable CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
+public class SimulationTimelineState
+#pragma warning restore CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
+{
+    public bool? skyMob = null;
+    public bool? nearMarble = null;
+    public bool? nearGranite = null;
+    public bool? spawnSpider = null;
+    public bool? spawnUndergroundDesert = null;
+    public bool? isBeach = null;
+    public bool? isOcean = null;
+    public bool? surfaceSpawn = null;
+    public bool? dayTime = null;
+
+    static Func<object, object> CloneImpl = StateType.GenerateCloneMethod(typeof(SimulationTimelineState));
+    static Func<object, object, bool> EqImpl = StateType.GenerateEqMethod(typeof(SimulationTimelineState));
+
+    public SimulationTimelineState()
+    {
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is not SimulationTimelineState other)
+            return false;
+
+        return EqImpl(this, other);
+    }
+
+    public SimulationTimelineState Clone()
+    {
+        return (SimulationTimelineState)CloneImpl(this);
+    }
+}
+
+public abstract class SimulationNodeImpl
 {
     public abstract void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches);
 }
@@ -272,6 +326,7 @@ public struct BranchInfo
 {
     public float chance;
     public int returnValue;
+    public Action<SpawnSimulationContext>? onBranchSelected;
 }
 
 public enum NodeConnectionType
@@ -311,8 +366,8 @@ public class NodeConnection
     }
 
     public bool disconnected;
-    public NextRandomNode? nextNode;
-    public List<NextSpawnNode>? spawns;
+    public NextNode? nextNode;
+    public List<NextSpawn>? spawns;
 
     public NodeConnection(BranchInfo info, int node, int timeline, int branch)
     {
@@ -323,38 +378,40 @@ public class NodeConnection
     }
 }
 
-public class NextRandomNode
+public class NextNode
 {
     public int node;
 
     public int timeline;
 }
 
-public class NextSpawnNode
+public class NextSpawn
 {
     public int npcId;
     public int x;
     public int y;
 }
 
-public class SimRandomNode
+public class SimulationNode
 {
-    public List<SimRandomNodeTimeline> timelines = new();
+    public List<SimulationNodeTimeline> timelines = new();
 }
 
-public class SimRandomNodeTimeline
+public class SimulationNodeTimeline
 {
     public object localState;
     public object? stackState;
+    public SimulationTimelineState timelineState;
     public NodeRollParams rollParams;
     public NodeConnection[] branches;
 
-    public SimRandomNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState, object? stackState)
+    public SimulationNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState, object? stackState, SimulationTimelineState timelineState)
     {
         this.branches = branches;
         this.rollParams = rollParams;
         this.localState = localState;
         this.stackState = stackState;
+        this.timelineState = timelineState;
     }
 }
 

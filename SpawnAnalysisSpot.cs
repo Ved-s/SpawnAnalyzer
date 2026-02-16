@@ -16,7 +16,7 @@ class SpawnAnalysisSpot
 
     readonly bool xRange;
 
-    readonly SpawnParamsStage2 Params2;
+    readonly SpawnerChances Params2;
 
     readonly NPC.Spawner GlobalSpawner;
     readonly NPC.Spawner LocalSpawner;
@@ -36,7 +36,7 @@ class SpawnAnalysisSpot
         LocalSpawner.skyMob = p.skyMob;
         xRange = p.xRange;
 
-        SpawnParamsStage2 p2 = SpawnParamsStage2.WithValuesFrom(LocalSpawner);
+        SpawnerChances p2 = SpawnerChances.WithValuesFrom(LocalSpawner);
 
         SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(LocalSpawner, Position.X, Position.Y, SpawnTileType, SpawnWallType, ref p2);
 
@@ -66,7 +66,7 @@ class SpawnAnalysisSpot
                 continue;
 
             string chanceName = field.Name + "Chance";
-            FieldInfo? chanceField = typeof(SpawnParamsStage2).GetField(chanceName, (BindingFlags)(-1));
+            FieldInfo? chanceField = typeof(SpawnerChances).GetField(chanceName, (BindingFlags)(-1));
             if (chanceField is not null)
             {
                 float chance = (float)chanceField.GetValue(Params2)!;
