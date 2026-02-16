@@ -38,9 +38,9 @@ class SetSpawnFlagsForChosenTileRewriter
 
     static void RewriteMethod(ILContext il)
     {
-        TypeReference spawnParams2RefType = il.Import(typeof(SpawnerChances).MakeByRefType());
+        TypeReference spawnerChancesType = il.Import(typeof(SpawnerChances));
 
-        ParameterDefinition spawnParamsParam = new("spawnParams", Mono.Cecil.ParameterAttributes.None, spawnParams2RefType);
+        ParameterDefinition spawnerChancesParam = new("spawnParams", Mono.Cecil.ParameterAttributes.None, spawnerChancesType);
 
         ILCursor c = new(il);
 
@@ -98,7 +98,7 @@ class SetSpawnFlagsForChosenTileRewriter
             c.Emit(OpCodes.Ldc_I4, res.yStepStart);
             c.Emit(OpCodes.Ldc_I4, res.yStepEnd);
             c.Emit(OpCodes.Ldc_I4, res.width);
-            c.Emit(OpCodes.Ldarg, spawnParamsParam);
+            c.Emit(OpCodes.Ldarg, spawnerChancesParam);
             c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CalculateChanceForMarbleAndGranite));
         }
 
@@ -141,7 +141,7 @@ class SetSpawnFlagsForChosenTileRewriter
             c.Emit(OpCodes.Ldarg_1);
             c.Emit(OpCodes.Ldarg_2);
             c.Emit(OpCodes.Ldc_I4, i);
-            c.Emit(OpCodes.Ldarg, spawnParamsParam);
+            c.Emit(OpCodes.Ldarg, spawnerChancesParam);
             c.Emit<SpawnerChances>(OpCodes.Ldflda, field + "Chance");
             c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CalculateChanceForSpidersAndDeserts));
         }
@@ -189,7 +189,7 @@ class SetSpawnFlagsForChosenTileRewriter
             FieldReference chanceField = new(field.Name + "Chance", il.Import(typeof(float)), il.Import(typeof(SpawnerChances)));
 
             c.RemoveRange(7);
-            c.Emit(OpCodes.Ldarg, spawnParamsParam);
+            c.Emit(OpCodes.Ldarg, spawnerChancesParam);
             c.Emit(OpCodes.Dup);
             c.Emit(OpCodes.Ldfld, chanceField);
             c.Emit(OpCodes.Ldc_R4, 1f / chanceDenom);
@@ -197,7 +197,7 @@ class SetSpawnFlagsForChosenTileRewriter
             c.Emit(OpCodes.Stfld, chanceField);
         }
 
-        PatchSurfaceSpawnAndDaytimeForRemix(c, spawnParamsParam);
+        PatchSurfaceSpawnAndDaytimeForRemix(c, spawnerChancesParam);
 
         // Replace this.field = X; with spawnParams.fieldChance = X;
         List<string> overriddenChanceFieldNames = [];
@@ -243,7 +243,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 */
 
                 c.Next!.OpCode = OpCodes.Ldarg;
-                c.Next.Operand = spawnParamsParam;
+                c.Next.Operand = spawnerChancesParam;
                 c.Index += 1;
                 c.Next.OpCode = OpCodes.Ldc_R4;
                 c.Next.Operand = (float)fieldValue;
@@ -267,7 +267,7 @@ class SetSpawnFlagsForChosenTileRewriter
 
                 c.Emit(OpCodes.Stloc, tempFloat);
                 c.Emit(OpCodes.Pop);
-                c.Emit(OpCodes.Ldarg, spawnParamsParam);
+                c.Emit(OpCodes.Ldarg, spawnerChancesParam);
                 c.Emit(OpCodes.Ldloc, tempFloat);
                 c.Emit<SpawnerChances>(OpCodes.Stfld, replaceField.Name + "Chance");
             }
@@ -327,7 +327,7 @@ class SetSpawnFlagsForChosenTileRewriter
         il.Method.IsStatic = true;
         il.Method.HasThis = false;
 
-        il.Method.Parameters.Add(spawnParamsParam);
+        il.Method.Parameters.Add(spawnerChancesParam);
     }
 
     struct MatchMarbleGraniteChanceResult
@@ -650,7 +650,7 @@ class SetSpawnFlagsForChosenTileRewriter
         int xStepStart, int xStepEnd,
         int yStepStart, int yStepEnd,
         int width,
-        ref SpawnerChances p2
+        SpawnerChances p2
     )
     {
         if (p2.nearGraniteChance >= 1 && p2.nearMarbleChance >= 1)
@@ -1012,7 +1012,7 @@ class SetSpawnFlagsForChosenTileRewriter
         chance = CombineChances(chance, totalChance);
     }
 
-    static void PatchSurfaceSpawnAndDaytimeForRemix(ILCursor c, ParameterDefinition spawnParamsParam)
+    static void PatchSurfaceSpawnAndDaytimeForRemix(ILCursor c, ParameterDefinition spawnerChancesParam)
     {
         VariableDefinition firstCondition = new(c.IL.Import(typeof(bool)));
         VariableDefinition secondCondition = new(c.IL.Import(typeof(bool)));
@@ -1162,11 +1162,11 @@ class SetSpawnFlagsForChosenTileRewriter
 
         c.Emit(OpCodes.Ldloc, firstCondition);
         c.Emit(OpCodes.Ldloc, secondCondition);
-        c.Emit(OpCodes.Ldarg, spawnParamsParam);
+        c.Emit(OpCodes.Ldarg, spawnerChancesParam);
         c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CalculateSurfaceSpawnAndDaytimeForRemixChances));
     }
 
-    static void CalculateSurfaceSpawnAndDaytimeForRemixChances(bool firstCondition, bool secondCondition, ref SpawnerChances p2)
+    static void CalculateSurfaceSpawnAndDaytimeForRemixChances(bool firstCondition, bool secondCondition, SpawnerChances p2)
     {
         // TODO: dependent percent rules
         if (firstCondition)

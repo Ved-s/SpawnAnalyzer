@@ -3,56 +3,105 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using Microsoft.Xna.Framework;
+using SpawnAnalyzer.Simulation;
 using Terraria;
+using Terraria.Map;
 
 namespace SpawnAnalyzer;
 
 class SpawnAnalysisSpot
 {
-    public Point Position;
+    public Point position;
 
-    readonly int SpawnTileType;
-    readonly int SpawnWallType;
+    readonly int spawnTileType;
+    readonly int spawnWallType;
 
     readonly bool xRange;
 
-    readonly SpawnerChances Params2;
+    readonly SpawnerChances chances;
 
-    readonly NPC.Spawner GlobalSpawner;
-    readonly NPC.Spawner LocalSpawner;
+    readonly NPC.Spawner localSpawner;
+    readonly SpawnAnalysis analysis;
 
-    public SpawnAnalysisSpot(NPC.Spawner globalSpawner, Point position, SpawnParamsStage1 p)
+    readonly SpawnSimulationContext simulationContext;
+
+    public SpawnAnalysisSpot(SpawnAnalysis analysis, Point position, SpawnParamsStage1 p)
     {
-        GlobalSpawner = globalSpawner;
-        Position = position;
+        this.analysis = analysis;
+        this.position = position;
 
-        NPC.Spawner.GetProperGroundSpawnTileTypeAndWallType(position.X, position.Y, out SpawnTileType, out SpawnWallType);
+        NPC.Spawner.GetProperGroundSpawnTileTypeAndWallType(position.X, position.Y, out spawnTileType, out spawnWallType);
 #pragma warning disable SYSLIB0050 // Type or member is obsolete
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
 #pragma warning restore SYSLIB0050 // Type or member is obsolete
-        ShallowCloneFields(globalSpawner, spawner);
-        LocalSpawner = spawner;
+        ShallowCloneFields(analysis.globalSpawner, spawner);
+        localSpawner = spawner;
 
-        LocalSpawner.skyMob = p.skyMob;
+        localSpawner.skyMob = p.skyMob;
         xRange = p.xRange;
 
-        SpawnerChances p2 = SpawnerChances.WithValuesFrom(LocalSpawner);
+        SpawnerChances p2 = SpawnerChances.WithValuesFrom(localSpawner);
 
-        SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(LocalSpawner, Position.X, Position.Y, SpawnTileType, SpawnWallType, ref p2);
+        SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, p2);
 
-        Params2 = p2;
+        chances = p2;
+
+        simulationContext = new(SpawnAnalyzer.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
+
+    }
+
+    internal void Simulate()
+    {
+        SimulationResult? results = simulationContext.Simulate();
+        if (results is null)
+            return;
+        
+        SpawnAnalyzer.AnalyzeSimulationResults(results.Value.nodes, results.Value.startNode, 0, v =>
+        {
+            var (spawn, rollParams, chance) = v;
+
+            int x = spawn.x / 16;
+            int y = spawn.y / 16;
+
+            Point pos = new(x, y);
+
+            if (!analysis.results.TryGetValue(pos, out SpawnAnalysisResult? result))
+            {
+                result = new();
+                analysis.results.Add(pos, result);
+            }
+
+            if (!result.spawns.TryGetValue(spawn.npcId, out SpawnAnalysisResultSpawn? resultSpawn))
+            {
+                resultSpawn = new();
+                result.spawns.Add(spawn.npcId, resultSpawn);
+            }
+
+            if (spawn.leakedSpawn)
+            {
+                resultSpawn.leakedSpawnChance += chance;
+                resultSpawn.leakedSpawnCount++;
+            }
+            else
+            {
+                resultSpawn.chance += chance;
+                resultSpawn.count++;
+            }
+
+            resultSpawn.dependsOnLuck |= rollParams.dependsOnLuck;
+        });
     }
 
     internal void MouseOver(StringBuilder mouseOverText)
     {
-        mouseOverText.Append($"X: {Position.X} Y: {Position.Y}\n");
-        mouseOverText.Append($"TileID: {SpawnTileType} WallID: {SpawnWallType}\n");
+        mouseOverText.Append($"X: {position.X} Y: {position.Y}\n");
+        mouseOverText.Append($"TileID: {spawnTileType} WallID: {spawnWallType}\n");
 
         if (xRange)
         {
             mouseOverText.Append($"  xRange: True\n");
         }
-        if (LocalSpawner.skyMob && GlobalSpawner.skyMob)
+        if (localSpawner.skyMob && analysis.globalSpawner.skyMob)
         {
             mouseOverText.Append($"  skyMob: True\n");
         }
@@ -69,7 +118,7 @@ class SpawnAnalysisSpot
             FieldInfo? chanceField = typeof(SpawnerChances).GetField(chanceName, (BindingFlags)(-1));
             if (chanceField is not null)
             {
-                float chance = (float)chanceField.GetValue(Params2)!;
+                float chance = (float)chanceField.GetValue(chances)!;
                 if (chance == 0f)
                 {
                     continue;
@@ -90,8 +139,8 @@ class SpawnAnalysisSpot
                 continue;
             }
 
-            object globalValue = field.GetValue(GlobalSpawner)!;
-            object localValue = field.GetValue(LocalSpawner)!;
+            object globalValue = field.GetValue(analysis.globalSpawner)!;
+            object localValue = field.GetValue(localSpawner)!;
             object defaultValue = field.Name switch
             {
                 "defaultTarget" => 255,
@@ -146,9 +195,8 @@ class SpawnAnalysisSpot
     {
         return new()
         {
-            skyMob = LocalSpawner.skyMob,
+            skyMob = localSpawner.skyMob,
             xRange = xRange,
         };
     }
-
 }

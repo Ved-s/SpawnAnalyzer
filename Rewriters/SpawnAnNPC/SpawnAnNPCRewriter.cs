@@ -175,7 +175,7 @@ public class SpawnAnNPCRewriter
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
         RewriteOldArgAccessors(c, contextParam);
-        VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
+        // VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
 
         localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 

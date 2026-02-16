@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -13,17 +14,22 @@ using SpawnAnalyzer.Rewriters;
 using SpawnAnalyzer.Rewriters.SpawnANnNPC;
 using SpawnAnalyzer.Simulation;
 using Terraria;
+using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.UI;
 
 namespace SpawnAnalyzer;
 
+// TODO: Optimize 100% and 0% chances, merge same return value branches
+// TODO: Spawner.GetSpawnRate
+
 // TODO: warning about side-effects and inconsistent chances, hook Spawner.SpawnNPC and NPC.NewNPC to catch unwanted spawns
 // TODO: no side effects in the simulated function
-// TODO: nodes for inputs with chances
 
 // TODO: nodes for NPCCount
 // TODO: better selftests?
+// TODO: slime code at the start of SpawnNPC
+// TODO: anything that can go wrong, will go wrong, show warnings and errors
 
 // TODO: build method block tree to determine when locals end
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
@@ -34,12 +40,17 @@ public class SpawnAnalyzer
     internal delegate bool GetSpawnTileParams(NPC.Spawner spawner, Player player, ref int x, ref int y, Rectangle spawnArea, Rectangle safeArea, out SpawnParamsStage1 spawnParams);
     internal static readonly GetSpawnTileParams GetSpawnTileParamsImpl = GetSpawnTileParamsRewriter.GenerateMethod();
 
-    internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, ref SpawnerChances spawnParams);
+    internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, SpawnerChances spawnParams);
     internal static readonly SetSpawnFlagsForChosenTile SetSpawnFlagsForChosenTileImpl = SetSpawnFlagsForChosenTileRewriter.GenerateMethod();
+
+    // TODO: offload to a different thread
+    internal static readonly SpawnAnNPCRewriteData SpawnAnNpcRewrite = SpawnAnNPCRewriter.RewriteMethod(null);
 
     internal static Hook? MainUpdateHook;
     internal static Hook? MainDrawMouseOverHook;
     internal static Hook? MainSetupDrawInterfaceLayersHook;
+    internal static Hook? NPCSpawnerSpawnNPCHook;
+    internal static Hook? NPCNewNPCHook;
 
     static int AnalyzeInTicks = -1;
     public static void InstallVanilla()
@@ -50,166 +61,39 @@ public class SpawnAnalyzer
         MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
 
-        SelfTest();
+        NPCSpawnerSpawnNPCHook = new Hook(Utils.GetMethodOrThrow<NPC.Spawner>("SpawnNPC", [
+            typeof(int), typeof(int), typeof(int), typeof(int),
+            typeof(float), typeof(float), typeof(float), typeof(float),
+            typeof(int)
+        ]), On_NPC_Spawner_SpawnNPC);
 
-        Environment.Exit(1);
+        NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
+    }
 
-        Stopwatch sw = Stopwatch.StartNew();
-        var d = SpawnAnNPCRewriter.RewriteMethod(null, false); //TestMethods.GetTestMethodInfo(9), false);
-        sw.Stop();
-        Console.WriteLine($"Rewrote method in {sw.ElapsedMilliseconds}ms");
-
-#pragma warning disable SYSLIB0050 // Type or member is obsolete
-        var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
-#pragma warning restore SYSLIB0050 // Type or member is obsolete
-
-        int x = 100;
-        int y = 100;
-        int tileType = TileID.Grass;
-
-        SpawnerChances chances = SpawnerChances.WithValuesFrom(spawner);
-
-        var ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, false);
-
-        Main.tile = new Tile[500, 500];
-
-        for (int i = 0; i < Main.tile.GetLength(0); i++)
-        {
-            for (int j = 0; j < Main.tile.GetLength(1); j++)
-            {
-                Main.tile[i, j] = new();
-            }
-        }
-
-        Main.tile[x, y].type = (ushort)tileType;
-
-        Main.npc = new NPC[200];
-        for (int i = 0; i < Main.npc.Length; i++)
-        {
-            Main.npc[i] = new();
-        }
-
-        Main.ActiveWorldFileData = new();
-        Main.ActiveWorldFileData.WorldId = 1;
-        NPC.SetWorldSpecificMonstersByWorldID();
-
-        spawner.dayTime = true;
-        spawner.surfaceSpawn = true;
-
-
-        sw.Restart();
-        var data = ctx.Simulate() ?? throw new NullReferenceException();
-        sw.Stop();
-
-        Console.WriteLine($"Simulated in {sw.ElapsedMilliseconds}ms, entry node {data.startNode}, visited {data.nodes.Count(n => n is not null)}/{d.Nodes.Length} nodes");
-
-        for (int i = 0; i < data.nodes.Count; i++)
-        {
-            var node = data.nodes[i];
-            if (node is null)
-            {
-                continue;
-            }
-
-            int offset = d.Nodes[i].Offset;
-            if (data.startNode == i)
-            {
-                Console.WriteLine($"Node {i} [IL_{offset:x4}] (start): ");
-            }
-            else
-            {
-                Console.WriteLine($"Node {i} [IL_{offset:x4}]: ");
-            }
-
-            for (int t = 0; t < node.timelines.Count; t++)
-            {
-
-                Console.WriteLine($"  Timeline {t}:");
-                var timeline = node.timelines[t];
-                foreach (var branch in timeline.branches)
-                {
-                    string ps = $"   [{branch.info.chance * 100:.0}%] -> ";
-                    Console.Write(ps);
-
-                    bool firstline = true;
-
-                    if (branch.spawns is not null)
-                    {
-                        foreach (var spawn in branch.spawns)
-                        {
-                            if (!firstline)
-                            {
-                                Console.WriteLine(",");
-                                for (int j = 0; j < ps.Length; j++)
-                                {
-                                    Console.Write(' ');
-                                }
-                            }
-                            firstline = false;
-                            Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
-                        }
-                    }
-
-                    if (branch.nextNode is not null)
-                    {
-                        if (!firstline)
-                        {
-                            Console.WriteLine(",");
-                            for (int j = 0; j < ps.Length; j++)
-                            {
-                                Console.Write(' ');
-                            }
-                        }
-                        firstline = false;
-
-                        Console.Write($"Node {branch.nextNode!.node}/{branch.nextNode!.timeline}");
-                    }
-
-                    if (firstline)
-                    {
-                        Console.Write($"Nothing");
-                    }
-                    Console.WriteLine();
-                }
-            }
-        }
-
-        Dictionary<int, (NodeRollParams, float)> spawns = new();
-
+    public static void AnalyzeSimulationResults(List<SimulationNode?> nodes, int entryNode, int entryNodeTimeline, Action<(NextSpawn, NodeRollParams, float)> consumer)
+    {
         // (node, timeline, branch, chance)
         Stack<(int, int, int, float)> exploreStack = new();
 
-        var startTimeline = data.nodes[data.startNode]!.timelines[0];
+        var startTimeline = nodes[entryNode]!.timelines[entryNodeTimeline];
 
         for (int i = 0; i < startTimeline.branches.Length; i++)
         {
-            exploreStack.Push((data.startNode, 0, i, startTimeline.branches[i].info.chance));
-        }
-
-        void MergeParams(NodeRollParams into, NodeRollParams p)
-        {
-            into.dependsOnLuck |= p.dependsOnLuck;
+            exploreStack.Push((entryNode, entryNodeTimeline, i, startTimeline.branches[i].info.chance));
         }
 
         while (exploreStack.Count > 0)
         {
-            var (node, timeline, branch, percent) = exploreStack.Pop();
+            var (node, timeline, branch, chance) = exploreStack.Pop();
 
-            var timelinev = data.nodes[node]!.timelines[timeline];
+            var timelinev = nodes[node]!.timelines[timeline];
             var branchv = timelinev.branches[branch];
 
-            (NodeRollParams, float) oldvalue;
             if (branchv.spawns is not null)
             {
                 foreach (var spawn in branchv.spawns)
                 {
-                    if (!spawns.TryGetValue(spawn.npcId, out oldvalue))
-                    {
-                        oldvalue = (new(), 0);
-                    }
-
-                    MergeParams(oldvalue.Item1, timelinev.rollParams);
-                    spawns[spawn.npcId] = (oldvalue.Item1, percent + oldvalue.Item2);
+                    consumer((spawn, timelinev.rollParams, chance));
                 }
             }
 
@@ -217,10 +101,10 @@ public class SpawnAnalyzer
             {
                 case NodeConnectionType.RandomNode:
                     var next = branchv.nextNode!;
-                    var nextTimeline = data.nodes[next.node]!.timelines[next.timeline];
+                    var nextTimeline = nodes[next.node]!.timelines[next.timeline];
                     for (int i = 0; i < nextTimeline.branches.Length; i++)
                     {
-                        exploreStack.Push((next.node, next.timeline, i, nextTimeline.branches[i].info.chance * percent));
+                        exploreStack.Push((next.node, next.timeline, i, nextTimeline.branches[i].info.chance * chance));
                     }
                     break;
 
@@ -228,44 +112,9 @@ public class SpawnAnalyzer
                     break;
 
                 case NodeConnectionType.NoConnection:
-                    if (!spawns.TryGetValue(int.MinValue, out oldvalue))
-                    {
-                        oldvalue = (new(), 0);
-                    }
-
-                    spawns[int.MinValue] = (oldvalue.Item1, percent + oldvalue.Item2);
                     break;
             }
         }
-
-        Console.WriteLine($"Luck: {spawner.luck:0.00}");
-
-        Console.WriteLine("Calculated spawns:");
-        float chancesAdd = 0;
-
-        foreach (KeyValuePair<int, (NodeRollParams, float)> kvp in spawns.OrderBy(kvp => kvp.Value.Item2))
-        {
-            chancesAdd += kvp.Value.Item2;
-            if (kvp.Key == int.MinValue)
-                Console.WriteLine($" Nothing: {kvp.Value.Item2 * 100:.000}%");
-            else
-            {
-                Console.Write($" {NPCID.Search.GetName(kvp.Key)} [{kvp.Key}]: {kvp.Value.Item2 * 100:.000}%");
-
-                NodeRollParams rp = kvp.Value.Item1;
-
-                if (rp.dependsOnLuck)
-                {
-                    Console.Write(" [luck]");
-                }
-
-                Console.WriteLine();
-            }
-        }
-
-        Console.WriteLine($"Chances add up to {chancesAdd * 100:0.000}%\n");
-
-        Environment.Exit(1);
     }
 
     public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false)
@@ -529,10 +378,7 @@ public class SpawnAnalyzer
 
     static void BeginAnalyze(Player player)
     {
-        Stopwatch sw = Stopwatch.StartNew();
         LastAnalysis = new(player);
-        sw.Stop();
-        Console.WriteLine($"Analyzed spawns in {sw.ElapsedMilliseconds}ms");
     }
 
     delegate void orig_Main_Update(Main self, GameTime time);
@@ -542,7 +388,14 @@ public class SpawnAnalyzer
 
         if (AnalyzeInTicks == 0 || (Main.keyState.IsKeyDown(Keys.Z) && !Main.oldKeyState.IsKeyDown(Keys.Z)))
         {
-            BeginAnalyze(Main.player[Main.myPlayer]);
+            if (Main.keyState.PressingShift())
+            {
+                LastAnalysis?.Simulate();
+            }
+            else
+            {
+                BeginAnalyze(Main.player[Main.myPlayer]);
+            }
         }
 
         if (AnalyzeInTicks >= 0)
@@ -573,6 +426,42 @@ public class SpawnAnalyzer
     }
 
 
+    delegate NPC orig_NPC_Spawner_SpawnNPC(NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
+    static NPC On_NPC_Spawner_SpawnNPC(orig_NPC_Spawner_SpawnNPC orig, NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
+    {
+        if (SpawnSimulationContext.CurrentlySimulatingContext is not null)
+        {
+            SpawnSimulationContext.CurrentlySimulatingContext.AddCurrentConnectionSpawn(new()
+            {
+                x = X,
+                y = Y,
+                npcId = Type,
+                leakedSpawn = true,
+            });
+            return new() { whoAmI = 199 };
+        }
+
+        return orig(self, X, Y, Type, Start, ai0, ai1, ai2, ai3, Target);
+    }
+
+    delegate int orig_NPC_NewNPC(IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
+    static int On_NPC_NewNPC(orig_NPC_NewNPC orig, IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
+    {
+        if (SpawnSimulationContext.CurrentlySimulatingContext is not null)
+        {
+            SpawnSimulationContext.CurrentlySimulatingContext.AddCurrentConnectionSpawn(new()
+            {
+                x = X,
+                y = Y,
+                npcId = Type,
+                leakedSpawn = true,
+            });
+            return Main.maxNPCs;
+        }
+
+        return orig(source, X, Y, Type, Start, ai0, ai1, ai2, ai3, Target);
+    }
+
     internal static bool MatchInstructions(ILContext c, int pos, out int matchEndPos, params Func<Instruction, bool>[] matchers)
     {
         matchEndPos = pos;
@@ -591,7 +480,6 @@ public class SpawnAnalyzer
 
         return true;
     }
-
 
     internal static float PredictLuckChanceMod(float luck)
     {

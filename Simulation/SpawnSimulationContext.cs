@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Terraria;
 using SpawnAnalyzer.Rewriters.SpawnANnNPC;
 using Terraria.ID;
+using Terraria.GameContent.Bestiary;
 
 namespace SpawnAnalyzer.Simulation;
 
@@ -25,6 +26,11 @@ public class SpawnSimulationContext
 
     NodeConnection? currentConnection = null;
     int? foundInitialNode = null;
+
+    [ThreadStatic]
+    static SpawnSimulationContext? currentlySimulatingContext;
+
+    public static SpawnSimulationContext? CurrentlySimulatingContext { get => currentlySimulatingContext; }
 
     public SpawnSimulationContext(
         SpawnAnNPCRewriteData runData,
@@ -154,6 +160,16 @@ public class SpawnSimulationContext
 
     internal void ExitNodeHit(int x, int y, int type)
     {
+        AddCurrentConnectionSpawn(new()
+        {
+            npcId = type,
+            x = x,
+            y = y,
+        });
+    }
+
+    internal void AddCurrentConnectionSpawn(NextSpawn spawn)
+    {
         // Console.WriteLine($"Hit spawn {NPCID.Search.GetName(type)} [{type}] @ {x}, {y}");
         if (currentConnection is null)
         {
@@ -163,12 +179,7 @@ public class SpawnSimulationContext
         if (currentConnection.spawns is null)
             currentConnection.spawns = new();
 
-        currentConnection.spawns.Add(new()
-        {
-            npcId = type,
-            x = x,
-            y = y,
-        });
+        currentConnection.spawns.Add(spawn);
     }
 
     internal object GetLastNodeStackStateClone()
@@ -193,12 +204,32 @@ public class SpawnSimulationContext
         foundInitialNode = null;
         localState = Activator.CreateInstance(runData.LocalStateType.Type);
         currentTimeline = 0;
+        currentlySimulatingContext = this;
 
         int? entry = null;
         while (true)
         {
             // Console.WriteLine($"Start at entry {entry}");
-            runData.Method(entry, this);
+            try {
+                runData.Method(entry, this);
+            }
+            catch (Exception e)
+            {
+                if (currentConnection is null)
+                {
+                    Console.WriteLine($"Exception simulating at ({spawnTileX}, {spawnTileY}) from the beginning: {e}");
+                }
+                else
+                {
+                    int rv = currentConnection.info.returnValue;
+                    int startNode = currentConnection.startNode;
+                    int startNodeTimeline = currentConnection.startNodeTimeline;
+                    int offset = runData.Nodes[startNode].Offset;
+                    Console.WriteLine($"Exception simulating at ({spawnTileX}, {spawnTileY}) after node {startNode}/{startNodeTimeline} at IL_{offset:x4} return value {rv}: {e}");
+
+                    currentConnection.errors = true;
+                }
+            }
 
             if (currentConnection is not null)
             {
@@ -245,6 +276,8 @@ public class SpawnSimulationContext
             entry = nextNode.Value;
         }
 
+        currentlySimulatingContext = null;
+
         if (foundInitialNode is null)
             return null;
 
@@ -263,6 +296,8 @@ public class SpawnSimulationContext
 public struct SimulationResult
 {
     public int startNode;
+
+    public bool hasErrors;
 
     public List<SimulationNode?> nodes;
 }
@@ -335,6 +370,7 @@ public enum NodeConnectionType
     NoConnection,
     RandomNode,
     SpawnNode,
+    Error,
 }
 
 public class NodeConnection
@@ -349,6 +385,10 @@ public class NodeConnection
     {
         get
         {
+            if (errors)
+            {
+                return NodeConnectionType.Error;
+            }
             if (disconnected)
             {
                 return NodeConnectionType.NoConnection;
@@ -366,6 +406,7 @@ public class NodeConnection
     }
 
     public bool disconnected;
+    public bool errors;
     public NextNode? nextNode;
     public List<NextSpawn>? spawns;
 
@@ -390,6 +431,11 @@ public class NextSpawn
     public int npcId;
     public int x;
     public int y;
+
+    /// <summary>
+    /// Whether the spawn was hit from simulation itself or from an uncontrolled helper method
+    /// </summary>
+    public bool leakedSpawn = false;
 }
 
 public class SimulationNode
