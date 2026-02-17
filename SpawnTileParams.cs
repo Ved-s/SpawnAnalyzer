@@ -40,6 +40,12 @@ public struct SpawnParamsStage1
 
 public class SpawnerChances
 {
+    [GlobalChanceField]
+    public float spawnFriendlyChance;
+
+    [GlobalChanceField]
+    public float noWormsChance;
+
     public float nearMarbleChance;
     public float nearGraniteChance;
 
@@ -51,10 +57,16 @@ public class SpawnerChances
     public float dayTimeChance;
 
     readonly static Func<NPC.Spawner, SpawnerChances> InitFromSpawnerImpl = GenerateInitFromSpawnerMethod();
+    readonly static Action<SpawnerChances, SpawnerChances> CopyGlobalFieldsImpl = GenerateCopyGlobalFieldsMethod();
 
     public static SpawnerChances WithValuesFrom(NPC.Spawner spawner)
     {
         return InitFromSpawnerImpl(spawner);
+    }
+
+    public static void CopyGlobalFields(SpawnerChances from, SpawnerChances to)
+    {
+        CopyGlobalFieldsImpl(from, to);
     }
 
     static Func<NPC.Spawner, SpawnerChances> GenerateInitFromSpawnerMethod()
@@ -62,11 +74,11 @@ public class SpawnerChances
         DynamicMethodDefinition dmd = new("CopyChanceValuesFromSpawner", typeof(SpawnerChances), [typeof(NPC.Spawner)]);
 
         ILProcessor il = dmd.GetILProcessor();
-        VariableDefinition retultVar = new(il.Import(typeof(SpawnerChances)));
-        il.Body.Variables.Add(retultVar);
+        VariableDefinition resultVar = new(il.Import(typeof(SpawnerChances)));
+        il.Body.Variables.Add(resultVar);
 
         il.Emit(OpCodes.Newobj, il.Import(typeof(SpawnerChances).GetConstructor([]) ?? throw new MissingMethodException("SpawnerChances ctor")));
-        il.Emit(OpCodes.Stloc, retultVar);
+        il.Emit(OpCodes.Stloc, resultVar);
 
         foreach (FieldInfo field in typeof(SpawnerChances).GetFields())
         {
@@ -78,19 +90,43 @@ public class SpawnerChances
             if (spawnerField is null || spawnerField.IsStatic || spawnerField.FieldType != typeof(bool))
                 continue;
 
-            Convert.ToSingle(true);
-
-            il.Emit(OpCodes.Ldloc, retultVar);
+            il.Emit(OpCodes.Ldloc, resultVar);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, il.Import(spawnerField));
             il.Emit(OpCodes.Conv_R4);
             il.Emit(OpCodes.Stfld, il.Import(field));
         }
 
-        il.Emit(OpCodes.Ldloc, retultVar);
+        il.Emit(OpCodes.Ldloc, resultVar);
         il.Emit(OpCodes.Ret);
 
         MethodInfo method = dmd.Generate();
         return method.CreateDelegate<Func<NPC.Spawner, SpawnerChances>>();
     }
+
+    static Action<SpawnerChances, SpawnerChances> GenerateCopyGlobalFieldsMethod()
+    {
+        DynamicMethodDefinition dmd = new("CopyGlobalChanceFields", typeof(void), [typeof(SpawnerChances), typeof(SpawnerChances)]);
+
+        ILProcessor il = dmd.GetILProcessor();
+
+        foreach (FieldInfo field in typeof(SpawnerChances).GetFields())
+        {
+            if (field.IsStatic || field.GetCustomAttribute<GlobalChanceFieldAttribute>() is null)
+                continue;
+
+            il.Emit(OpCodes.Ldarg_1); 
+            il.Emit(OpCodes.Ldarg_0); 
+            il.Emit(OpCodes.Ldfld, il.Import(field));
+            il.Emit(OpCodes.Stfld, il.Import(field));
+        }
+
+        il.Emit(OpCodes.Ret);
+
+        MethodInfo method = dmd.Generate();
+        return method.CreateDelegate<Action<SpawnerChances, SpawnerChances>>();
+    }
 }
+
+[AttributeUsage(AttributeTargets.Field)]
+class GlobalChanceFieldAttribute : Attribute {}

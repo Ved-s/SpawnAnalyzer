@@ -49,6 +49,21 @@ public class LocalStateInfo
             c.Emit(OpCodes.Stfld, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
         }
 
+        c.Index = 0;
+
+        while (c.TryGotoNext(x => x.MatchLdloca(out local)))
+        {
+            if (local < 0)
+            {
+                continue;
+            }
+            c.Next!.OpCode = OpCodes.Ldarg;
+            c.Next!.Operand = contextParam;
+            c.Index += 1;
+            c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
+            c.Emit(OpCodes.Ldflda, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
+        }
+
         return type;
     }
 }

@@ -159,7 +159,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 +dup
                 +ldfld     SpawnParamsStage2::$chanceField
                 +ldc.r4    1f/chanceDenom
-                +call      float SetSpawnFlagsForChosenTileRewriter::CombineChances(float, float)
+                +call      float SpawnAnanlyzer::CombineChances(float, float)
                 +stfld     SpawnParamsStage2::$chanceField
 
 	        $endif:
@@ -193,7 +193,7 @@ class SetSpawnFlagsForChosenTileRewriter
             c.Emit(OpCodes.Dup);
             c.Emit(OpCodes.Ldfld, chanceField);
             c.Emit(OpCodes.Ldc_R4, 1f / chanceDenom);
-            c.Emit<SetSpawnFlagsForChosenTileRewriter>(OpCodes.Call, nameof(CombineChances));
+            c.Emit<SpawnAnalyzer>(OpCodes.Call, nameof(SpawnAnalyzer.CombineChances));
             c.Emit(OpCodes.Stfld, chanceField);
         }
 
@@ -718,8 +718,8 @@ class SetSpawnFlagsForChosenTileRewriter
         float marbleChance = (float)((double)marbleHits / checks);
         float graniteChance = (float)((double)graniteHits / checks);
 
-        p2.nearMarbleChance = CombineChances(p2.nearMarbleChance, marbleChance);
-        p2.nearGraniteChance = CombineChances(p2.nearGraniteChance, graniteChance);
+        p2.nearMarbleChance = SpawnAnalyzer.CombineChances(p2.nearMarbleChance, marbleChance);
+        p2.nearGraniteChance = SpawnAnalyzer.CombineChances(p2.nearGraniteChance, graniteChance);
     }
 
     static bool MatchSpiderOrDesertChance(
@@ -1009,7 +1009,7 @@ class SetSpawnFlagsForChosenTileRewriter
             totalChance = chance1scaled + chance2scaled;
         }
 
-        chance = CombineChances(chance, totalChance);
+        chance = SpawnAnalyzer.CombineChances(chance, totalChance);
     }
 
     static void PatchSurfaceSpawnAndDaytimeForRemix(ILCursor c, ParameterDefinition spawnerChancesParam)
@@ -1172,39 +1172,19 @@ class SetSpawnFlagsForChosenTileRewriter
         if (firstCondition)
         {
             float thisBranchChance = 2f / 3;
-            p2.surfaceSpawnChance = CombineChances(p2.surfaceSpawnChance, thisBranchChance);
+            p2.surfaceSpawnChance = SpawnAnalyzer.CombineChances(p2.surfaceSpawnChance, thisBranchChance);
             p2.dayTimeChance = p2.dayTimeChance * (1f - thisBranchChance) + thisBranchChance * 1f/2;
         }
         if (secondCondition)
         {
             float thisBranchChance = firstCondition ? 1f / 3 : 1f;
-            p2.surfaceSpawnChance = CombineChances(p2.surfaceSpawnChance, thisBranchChance);
+            p2.surfaceSpawnChance = SpawnAnalyzer.CombineChances(p2.surfaceSpawnChance, thisBranchChance);
         }
 
         if (firstCondition && secondCondition)
         {
             p2.surfaceSpawnChance = 1f;
         }
-    }
-
-    /// <summary>
-    /// Returns the chance for any of the two hitting
-    /// </summary>
-    static float CombineChances(float a, float b)
-    {
-        if (a <= 0)
-        {
-            return b;
-        }
-        if (b <= 0)
-        {
-            return a;
-        }
-        if (a >= 1.0 || b >= 1.0)
-        {
-            return 1.0f;
-        }
-        return a + b - (a * b);
     }
 }
 

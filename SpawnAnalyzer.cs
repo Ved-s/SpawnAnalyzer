@@ -20,11 +20,14 @@ using Terraria.UI;
 
 namespace SpawnAnalyzer;
 
-// TODO: Optimize 100% and 0% chances, merge same return value branches
 // TODO: Spawner.GetSpawnRate
+// TODO: Optimize 100% and 0% chances, merge same return value branches
 
-// TODO: warning about side-effects and inconsistent chances, hook Spawner.SpawnNPC and NPC.NewNPC to catch unwanted spawns
+// TODO: warning about side-effects and inconsistent chances
 // TODO: no side effects in the simulated function
+// TODO: function inlining
+// TODO: pX and pY are player.Center tile, display them properly
+// TODO: Spawner.ShouldSpawnInvasionEnemies in SetSpawnFlags
 
 // TODO: nodes for NPCCount
 // TODO: better selftests?
@@ -42,6 +45,9 @@ public class SpawnAnalyzer
 
     internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, SpawnerChances spawnParams);
     internal static readonly SetSpawnFlagsForChosenTile SetSpawnFlagsForChosenTileImpl = SetSpawnFlagsForChosenTileRewriter.GenerateMethod();
+
+    internal delegate void GetSpawnRate(NPC.Spawner spawner, Player player, out int spawnRate, out int maxSpawns, SpawnerChances spawnParams);
+    internal static readonly GetSpawnRate GetSpawnRateImpl = GetSpawnRateRewriter.GenerateMethod();
 
     // TODO: offload to a different thread
     internal static readonly SpawnAnNPCRewriteData SpawnAnNpcRewrite = SpawnAnNPCRewriter.RewriteMethod(null);
@@ -512,6 +518,38 @@ public class SpawnAnalyzer
         {
             return 1.0f;
         }
+    }
+
+    /// <summary>
+    /// Average multiplier of
+    /// <code>
+    /// if (rand(chance)) 
+    ///     value *= multiplier
+    /// </code>
+    /// </summary>
+    internal static float PredictAverageRandomChanceMultiplier(float chance, float multiplier)
+    {
+        return (1.0f - chance) + (multiplier * chance);
+    }
+
+    /// <summary>
+    /// Returns the chance for any of the two hitting
+    /// </summary>
+    internal static float CombineChances(float a, float b)
+    {
+        if (a <= 0)
+        {
+            return b;
+        }
+        if (b <= 0)
+        {
+            return a;
+        }
+        if (a >= 1.0 || b >= 1.0)
+        {
+            return 1.0f;
+        }
+        return a + b - (a * b);
     }
 
     internal static void ReportUnknownPattern(string type, ILContext c, int index, int showBefore, int showAfter)

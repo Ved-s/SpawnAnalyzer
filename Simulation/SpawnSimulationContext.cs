@@ -321,6 +321,8 @@ public class SimulationNodeInfo
 public class SimulationTimelineState
 #pragma warning restore CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
 {
+    public bool? spawnFriendly = null;
+    public bool? noWorms = null;
     public bool? skyMob = null;
     public bool? nearMarble = null;
     public bool? nearGranite = null;

@@ -40,14 +40,14 @@ class SpawnAnalysisSpot
         localSpawner.skyMob = p.skyMob;
         xRange = p.xRange;
 
-        SpawnerChances p2 = SpawnerChances.WithValuesFrom(localSpawner);
+        SpawnerChances localChances = SpawnerChances.WithValuesFrom(localSpawner);
+        SpawnerChances.CopyGlobalFields(analysis.globalSpawnerChances, localChances);
 
-        SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, p2);
+        SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, localChances);
 
-        chances = p2;
+        chances = localChances;
 
         simulationContext = new(SpawnAnalyzer.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
-
     }
 
     internal void Simulate()

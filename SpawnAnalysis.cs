@@ -30,12 +30,21 @@ class SpawnAnalysis
 
     public readonly NPC.Spawner globalSpawner = new();
 
+    public readonly SpawnerChances globalSpawnerChances;
+
+    public readonly int spawnRate;
+    public readonly int maxSpawns;
+
     public SpawnAnalysis(Player player)
     {
         Stopwatch sw = Stopwatch.StartNew();
         NPC.Spawner.GetSpawnArea(player, out spawnArea, out safeArea);
 
         Utils.GetMethodOrThrow<NPC.Spawner>("SetSpawnFlags").Invoke(globalSpawner, [player]);
+
+        globalSpawnerChances = SpawnerChances.WithValuesFrom(globalSpawner);
+
+        SpawnAnalyzer.GetSpawnRateImpl(globalSpawner, player, out spawnRate, out maxSpawns, globalSpawnerChances);
 
         // Seems like GetSpawnTileParams only outputs one type of spawn params per tile, pick the first
         // and show warnings on multiple different
