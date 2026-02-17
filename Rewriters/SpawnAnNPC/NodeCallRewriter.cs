@@ -525,6 +525,19 @@ class NodeRewriter
         {
             return new(ValueHandlerType.ZeroOrNonzero);
         }
+        else if (SpawnAnalyzer.MatchInstructions(
+            c.Context, index, out _,
+            x => x.MatchConvI2(),
+            x => x.MatchStloc(out _)
+        ))
+        {
+            return new(ValueHandlerType.AllUnique);
+        }
+        else if (ins.MatchBr(out ILLabel? target))
+        {
+            c.Goto(target.Target);
+            return TryCreateValueHandler(c, value, allowUnknownPatterns);
+        }
 
         /*
             call      int32 Terraria.NPC::CountNPCS(int32)

@@ -75,6 +75,9 @@ public class SpawnAnNPCRewriter
         StateType ls = null!;
 
         int nodeSwitchIndex = 0;
+        InlineCalls(il);
+
+        dmd.Definition.RecalculateILOffsets();
 
         il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex));
 
@@ -98,7 +101,7 @@ public class SpawnAnNPCRewriter
             {
                 stackException = e;
             }
-            
+
 
             il.FancyPrintout(stack?.instructions);
 
@@ -106,7 +109,7 @@ public class SpawnAnNPCRewriter
             {
                 Console.WriteLine($"Stack analysis exception: {stackException}");
             }
-            
+
         }
 
         DMDHack.SetNullOriginalMethod(dmd);
@@ -129,10 +132,10 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
-        StackAnalysis stack = StackAnalyzer.Analyze(il);
-
         ILCursor c = new(il);
 
+        StackAnalysis stack = StackAnalyzer.Analyze(il);
+        
         ILLabel mainEntryLabel = il.DefineLabel();
         List<ILLabel> entryJumps = [];
 
@@ -157,8 +160,8 @@ public class SpawnAnNPCRewriter
         NodeRewriter nodeRewriter = new(
             nodes, contextParam,
             stopVar, randomParamVar, stackStateVar, tempIntVar, tempNullBoolVar,
-            entryJumps, 
-            allowFields, allowMethods, 
+            entryJumps,
+            allowFields, allowMethods,
             stack
         );
 
@@ -359,7 +362,7 @@ public class SpawnAnNPCRewriter
         c.Index = 0;
 
         while (c.TryGotoNext(
-            x=>OutsideWritingOpcodes.Contains(x.OpCode)
+            x => OutsideWritingOpcodes.Contains(x.OpCode)
         ))
         {
             if (c.Next!.Operand is MethodReference method)
@@ -370,7 +373,7 @@ public class SpawnAnNPCRewriter
                 if (declaringType is not null)
                 {
                     if (
-                        declaringType == typeof(Math) 
+                        declaringType == typeof(Math)
                      || declaringType == typeof(MathF)
                      || (declaringType.IsGenericType && declaringType.GetGenericTypeDefinition() == typeof(List<>))
                      || declaringType.IsArray
@@ -385,8 +388,8 @@ public class SpawnAnNPCRewriter
                     continue;
                 }
 
-                if (method.Name.StartsWith("get_") 
-                 && resolved.DeclaringType is not null 
+                if (method.Name.StartsWith("get_")
+                 && resolved.DeclaringType is not null
                  && resolved.DeclaringType.GetProperty(method.Name[4..], (BindingFlags)(-1)) is not null
                 )
                 {
@@ -417,10 +420,11 @@ public class SpawnAnNPCRewriter
                     {
                         Instruction producer = inputArray.producedBy[0];
                         bool ok = false;
-                        while (true) {
-                            if (c.Instrs.IndexOf(producer) < 0) 
+                        while (true)
+                        {
+                            if (c.Instrs.IndexOf(producer) < 0)
                                 break;
-                            
+
                             if (producer.OpCode == OpCodes.Newarr)
                             {
                                 ok = true;
@@ -432,7 +436,7 @@ public class SpawnAnNPCRewriter
                                 InstructionStackInfo? dupInfo = stack.LookupInstruction(producer, out _);
                                 if (dupInfo is null)
                                     break;
-                                
+
                                 StackValue inputValue = dupInfo.inValues[^1];
                                 if (inputValue.producedBy.Count != 1)
                                     break;
@@ -451,7 +455,7 @@ public class SpawnAnNPCRewriter
 
             }
 
-            if (nested) 
+            if (nested)
                 return false;
 
             sideEffects++;
@@ -460,7 +464,7 @@ public class SpawnAnNPCRewriter
             AssemblyPrint.Print(c.Next);
             Console.WriteLine();
         }
-        
+
         if (nested)
             return sideEffects == 0;
 
@@ -468,6 +472,36 @@ public class SpawnAnNPCRewriter
             throw new Exception($"{sideEffects} instructions with side-effects detected");
 
         return true;
+    }
+
+    static void InlineCalls(ILContext il)
+    {
+        bool IsATestInlineMethod(MethodReference method)
+        {
+            if (method.DeclaringType is null)
+                return false;
+
+            if (!method.DeclaringType.Is(typeof(TestMethods)))
+                return false;
+
+            MethodBase resolved = method.ResolveReflection();
+
+            return resolved.GetCustomAttribute<TestMethods.TestInlineAttribute>() is not null;
+        }
+
+        MethodBase[] inlineMethodsPass1 = [
+            Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnSpider"),
+            // Utils.GetMethodOrThrow<NPC>("FindCattailTop"),
+        ];
+
+        CallInliner.InlineCalls(il, m => inlineMethodsPass1.Any(m.Is) || IsATestInlineMethod(m));
+
+        MethodBase[] inlineMethodsPass2 = [
+            Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn_ChanceToBeHolidaySlime"),
+        ];
+        
+        CallInliner.InlineCalls(il, m => inlineMethodsPass2.Any(m.Is));
     }
 }
 

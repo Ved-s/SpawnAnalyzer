@@ -46,6 +46,19 @@ public class StackAnalyzer
         { OpCodes.Ldelem_U4,        typeof(uint)   },
     };
 
+    static Dictionary<OpCode, Type> LdindSimpleOpcodes = new() {
+        { OpCodes.Ldind_I,         typeof(nint)   },
+        { OpCodes.Ldind_I1,        typeof(sbyte)  },
+        { OpCodes.Ldind_I2,        typeof(short)  },
+        { OpCodes.Ldind_I4,        typeof(int)    },
+        { OpCodes.Ldind_I8,        typeof(long)   },
+        { OpCodes.Ldind_R4,        typeof(float)  },
+        { OpCodes.Ldind_R8,        typeof(double) },
+        { OpCodes.Ldind_U1,        typeof(byte)   },
+        { OpCodes.Ldind_U2,        typeof(ushort) },
+        { OpCodes.Ldind_U4,        typeof(uint)   },
+    };
+
     static Dictionary<OpCode, Type> ConversionOpcodes = new() {
         { OpCodes.Conv_I,         typeof(nint)  },
         { OpCodes.Conv_I1,        typeof(sbyte) },
@@ -152,6 +165,7 @@ public class StackAnalyzer
                 case StackBehaviour.Popref_pop1:
                 case StackBehaviour.Popref_popi:
                 case StackBehaviour.Pop1_pop1:
+                case StackBehaviour.Popi_popi:
                     if (info.outValues.Count < 2)
                         throw new InvalidProgramException($"Not enough values on the stack for {instr}");
 
@@ -380,6 +394,10 @@ public class StackAnalyzer
                         value = new(null, typeof(byte), SimpleType.Integer);
                     }
                     else if (LdelemSimpleOpcodes.TryGetValue(opCode, out Type? valueType))
+                    {
+                        value = new(null, valueType, SimpleTypeFromSystemType(valueType));
+                    }
+                    else if (LdindSimpleOpcodes.TryGetValue(opCode, out valueType))
                     {
                         value = new(null, valueType, SimpleTypeFromSystemType(valueType));
                     }

@@ -39,6 +39,9 @@ public static class TestMethods
         }
     }
 
+    [AttributeUsage(AttributeTargets.Method)]
+    public class TestInlineAttribute : Attribute {}
+
     public static TestNode[] TestMethod1ExpectedTestResults = [
         new([ // 0
             (1f/7, [], 1),
@@ -503,5 +506,65 @@ public static class TestMethods
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 2, 0, 0f, 0f, 0f, 0f, 255);
             return;
         }
+    }
+
+    public static TestNode[] TestMethod11ExpectedTestResults = [
+        new([ // 0
+            (0.5f, [], 1), // ret 0
+            (0.5f, [], 4), // ret 1
+        ]),
+
+        new([ // 1
+            (0.5f, [], 2), // ret 6
+            (0.5f, [], 3), // ret 7
+        ]),
+
+        new([ // 2
+            (0.5f, [12], null), // ret 6
+            (0.5f, [13], null), // ret 7
+        ]),
+
+        new([ // 3
+            (0.5f, [13], null), // ret 6
+            (0.5f, [14], null), // ret 7
+        ]),
+
+        new([ // 4
+            (0.5f, [], 5), // ret 0
+            (0.5f, [], 6), // ret 1
+        ]),
+
+        new([ // 5
+            (0.5f, [6], null), // ret 6
+            (0.5f, [7], null), // ret 7
+        ]),
+
+        new([ // 6
+            (0.5f, [7], null), // ret 6
+            (0.5f, [8], null), // ret 7
+        ]),
+    ];
+
+    [TestInline]
+    public static int TestMethod11Helper(bool b, int v)
+    {
+        if (b && v >= 1)
+        {
+            return Main.rand.Next(2); // 4
+        }
+        else
+        {
+            return Main.rand.Next(6, 8); // 1 (b = true), 2 (b = false, x = 6), 3 (b = false, x = 7), 5 (b = false, x = 0), 6 (b = false, x = 1)
+        }
+    }
+
+    public static void TestMethod11(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
+        int v = Main.rand.Next(2); // 0
+
+        int x = TestMethod11Helper(true, v);
+        int y = TestMethod11Helper(false, v);
+
+        spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, x + y, 0, 0f, 0f, 0f, 0f, 255);
     }
 }
