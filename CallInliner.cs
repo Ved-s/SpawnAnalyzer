@@ -190,7 +190,7 @@ public static class CallInliner
                 {
                     throw new InvalidOperationException("Unsupported starg in inlining function");
                 }
-                else if (newInstr.MatchLdarga(out index))
+                else if (newInstr.MatchLdarga(out _))
                 {
                     throw new InvalidOperationException("Unsupported ldarga in inlining function");
                 }
@@ -252,8 +252,6 @@ public static class CallInliner
                 i++;
             }
         }
-    
-
     }
 }
 

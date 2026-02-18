@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <TerrariaPath>/home/ved-s/.steam/debian-installation/steamapps/common/Terraria</TerrariaPath>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Configuration>Release</Configuration>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(TerrariaPath)/MonoMod.RuntimeDetour.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Core">
+      <HintPath>$(TerrariaPath)/MonoMod.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>$(TerrariaPath)/MonoMod.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="Mono.Cecil">
+      <HintPath>$(TerrariaPath)/Mono.Cecil.dll</HintPath>
+    </Reference>
+    <Reference Include="Terraria">
+      <HintPath>$(TerrariaPath)/TerrariaRelease.dll</HintPath>
+    </Reference>
+    <Reference Include="ReLogic">
+      <HintPath>$(TerrariaPath)/ReLogic.dll</HintPath>
+    </Reference>
+    <Reference Include="FNA">
+      <HintPath>$(TerrariaPath)/Libraries/FNA/1.0.0/FNA.dll</HintPath>
+    </Reference>
+
+    <CopyOutFiles Include="$(OutDir)/SpawnAnalyzer.*" />
+    <EmbeddedResource Include="Assets/*.png"/>
+  </ItemGroup>
+
+  <Target Name="CopyDll" AfterTargets="AfterBuild">
+    <Copy SourceFiles="@(CopyOutFiles)" DestinationFolder="$(TerrariaPath)" />
+  </Target>
+
+</Project>

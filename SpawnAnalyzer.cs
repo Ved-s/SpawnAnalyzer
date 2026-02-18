@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
@@ -13,6 +15,7 @@ using MonoMod.RuntimeDetour;
 using SpawnAnalyzer.Rewriters;
 using SpawnAnalyzer.Rewriters.SpawnANnNPC;
 using SpawnAnalyzer.Simulation;
+using SpawnAnalyzer.UI;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
@@ -58,12 +61,14 @@ public class SpawnAnalyzer
     internal static Hook? NPCSpawnerSpawnNPCHook;
     internal static Hook? NPCNewNPCHook;
 
+
+    static Dictionary<string, Texture2D> TextureCache = new();
+
     static int AnalyzeInTicks = -1;
     public static void InstallVanilla()
     {
-        Player.Hooks.OnEnterWorld += (_) => AnalyzeInTicks = 10;
-
         MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
+        MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("UpdateUIStates"), On_Main_UpdateUIStates);
         MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
 
@@ -74,6 +79,20 @@ public class SpawnAnalyzer
         ]), On_NPC_Spawner_SpawnNPC);
 
         NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
+    }
+
+    public static Texture2D GetTexture(string path)
+    {
+        if (TextureCache.TryGetValue(path, out Texture2D? texture))
+            return texture;
+
+        Stream stream = typeof(SpawnAnalyzer).Assembly.GetManifestResourceStream($"SpawnAnalyzer.Assets.{path.Replace('/', '.')}.png")
+            ?? throw new FileNotFoundException($"Could not find SpawnAnalyzer texture asset: {path}");
+        
+        texture = Texture2D.FromStream(Main.graphics.GraphicsDevice, stream);
+        TextureCache.Add(path, texture);
+
+        return texture;
     }
 
     public static void AnalyzeSimulationResults(List<SimulationNode?> nodes, int entryNode, int entryNodeTimeline, Action<(NextSpawn, NodeRollParams, float)> consumer)
@@ -410,6 +429,14 @@ public class SpawnAnalyzer
         }
     }
 
+    delegate void orig_Main_UpdateUIStates(GameTime time);
+    static void On_Main_UpdateUIStates(orig_Main_UpdateUIStates orig, GameTime time)
+    {
+        orig(time);
+
+        SpawnAnalyzerUI.UpdateUI(time);
+    }
+
     delegate void orig_Main_DrawMouseOver(Main self);
     static void On_Main_DrawMouseOver(orig_Main_DrawMouseOver orig, Main self)
     {
@@ -424,11 +451,19 @@ public class SpawnAnalyzer
         orig(self);
 
         List<GameInterfaceLayer> layers = (List<GameInterfaceLayer>)Utils.GetFieldOrThrow<Main>("_gameInterfaceLayers").GetValue(self)!;
-        layers.Add(new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
+
+        layers.Insert(0, new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
         {
             LastAnalysis?.DrawOverlay(Main.spriteBatch);
             return true;
         }));
+
+        int inventoryIndex = layers.FindIndex(l => l.Name == "Vanilla: Inventory");
+        layers.Insert(inventoryIndex+1, new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
+        {
+            SpawnAnalyzerUI.DrawLayer(Main.spriteBatch);
+            return true;
+        }, InterfaceScaleType.UI));
     }
 
 
