@@ -7,22 +7,21 @@ using System.Text;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using ReLogic.Graphics;
+using ReLogic.Reflection;
+using SpawnAnalyzer.UI;
 using Terraria;
+using Terraria.Audio;
 using Terraria.GameContent;
 using Terraria.ID;
+using Terraria.UI.Chat;
 
 namespace SpawnAnalyzer;
 
-class SpawnAnalysis
+public class SpawnAnalysis
 {
-    Rectangle spawnArea;
-    Rectangle safeArea;
-
-    int currentMouseOverPage = 0;
-    int mouseOverPages = 0;
-    const int LinesPerMouseOverPage = 10;
-
-    MouseState? oldMouseState;
+    public Rectangle spawnArea;
+    public Rectangle safeArea;
 
     public readonly Dictionary<Point, SpawnAnalysisSpot> foundSpawnSpots = new();
 
@@ -64,6 +63,7 @@ class SpawnAnalysis
                         foundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(this, new(xRef, yRef), spawnParams));
                         continue;
                     }
+                    spot.hits++;
 
                     if (!warning && spot.GetStage1Params() != spawnParams)
                     {
@@ -94,55 +94,122 @@ class SpawnAnalysis
 
     public void DrawOverlay(SpriteBatch sb)
     {
+        float colorScale = SpawnAnalyzerUI.Visible ? 0.6f : 0.4f;
+
         Rectangle spawnAreaScreen = new(
             (int)(spawnArea.X * 16 - Main.screenPosition.X),
             (int)(spawnArea.Y * 16 - Main.screenPosition.Y),
             spawnArea.Width * 16, spawnArea.Height * 16
         );
-        sb.Draw(TextureAssets.MagicPixel.Value, spawnAreaScreen, Color.Green * 0.1f);
+        sb.DrawRectBorder(spawnAreaScreen, Color.Lime * colorScale, 2);
+        ChatManager.DrawColorCodedStringWithShadow(sb, FontAssets.MouseText.Value, "Spawn area", spawnAreaScreen.TopLeft() + new Vector2(5), Color.White, 0f, Vector2.Zero, Vector2.One);
 
         Rectangle safeAreaScreen = new(
             (int)(safeArea.X * 16 - Main.screenPosition.X),
             (int)(safeArea.Y * 16 - Main.screenPosition.Y),
             safeArea.Width * 16, safeArea.Height * 16
         );
-        sb.Draw(TextureAssets.MagicPixel.Value, safeAreaScreen, Color.Yellow * 0.1f);
+        sb.DrawRectBorder(safeAreaScreen, Color.Yellow * colorScale, 2);
+        ChatManager.DrawColorCodedStringWithShadow(sb, FontAssets.MouseText.Value, "No spawn area", safeAreaScreen.TopLeft() + new Vector2(5), Color.White, 0f, Vector2.Zero, Vector2.One);
 
         Rectangle playerScreen = new(
             (int)(globalSpawner.pX * 16 - Main.screenPosition.X),
-            (int)(globalSpawner.pY * 16 - Main.screenPosition.Y),
+            (int)(globalSpawner.pY * 16 - Main.screenPosition.Y) - 16,
             2 * 16, 3 * 16
         );
-        sb.Draw(TextureAssets.MagicPixel.Value, playerScreen, Color.Red * 0.2f);
+        sb.DrawRectBorder(playerScreen, Color.Red * colorScale, 2);
+        ChatManager.DrawColorCodedStringWithShadow(sb, FontAssets.MouseText.Value, "Player position", playerScreen.BottomLeft() + new Vector2(0, 5), Color.White, 0f, Vector2.Zero, Vector2.One);
 
-        foreach (KeyValuePair<Point, SpawnAnalysisSpot> kvp in foundSpawnSpots)
+        HashSet<Point> drawnSpots = new();
+
+        IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.Keys);
+
+        Point mouseWorldPos = Main.MouseWorld.ToPoint() / new Point(16, 16);
+
+        Point? drawUISelectedPos = null;
+        Point? drawHoveredPos = null;
+
+        foreach (Point pos in allSpots)
         {
+            if (drawnSpots.Contains(pos))
+                continue;
+            drawnSpots.Add(pos);
+
             Rectangle rect = new(
-                (int)(kvp.Key.X * 16 - Main.screenPosition.X),
-                (int)(kvp.Key.Y * 16 - Main.screenPosition.Y),
+                (int)(pos.X * 16 - Main.screenPosition.X),
+                (int)(pos.Y * 16 - Main.screenPosition.Y),
                 16, 16
             );
-            sb.Draw(TextureAssets.MagicPixel.Value, rect, Color.Lime * 0.5f);
+
+            bool spawnSpot = foundSpawnSpots.ContainsKey(pos);
+            bool spawnResult = results.ContainsKey(pos);
+
+            Color color;
+
+            if (SpawnAnalyzerUI.Visible && SpawnAnalyzerUI.SelectedPos == pos)
+            {
+                drawUISelectedPos = pos;
+                continue;
+            }
+            else if (spawnSpot && spawnResult)
+                color = Color.Lerp(Color.Lime, Color.Yellow, 0.5f) * colorScale;
+            else if (spawnSpot)
+                color = Color.Lime * colorScale;
+            else
+                color = Color.Yellow * colorScale;
+
+            bool hover = mouseWorldPos == pos;
+            if (hover && SpawnAnalyzerUI.Visible)
+            {
+                drawHoveredPos = pos;
+            }
+            else
+            {
+                sb.DrawRectBorder(rect, color, 2);
+            }
+
+            if (hover && SpawnAnalyzerUI.Visible)
+            {
+                Main.LocalPlayer.mouseInterface = true;
+
+                if (Main.mouseLeft && Main.mouseLeftRelease)
+                {
+                    SpawnAnalyzerUI.SelectedPos = pos;
+                    SoundEngine.PlaySound(SoundID.MenuTick);
+                }
+            }
         }
 
-        foreach (KeyValuePair<Point, SpawnAnalysisResult> kvp in results)
+        if (drawUISelectedPos is not null)
         {
             Rectangle rect = new(
-                (int)(kvp.Key.X * 16 - Main.screenPosition.X),
-                (int)(kvp.Key.Y * 16 - Main.screenPosition.Y),
+                (int)(drawUISelectedPos.Value.X * 16 - Main.screenPosition.X),
+                (int)(drawUISelectedPos.Value.Y * 16 - Main.screenPosition.Y),
                 16, 16
             );
-            sb.Draw(TextureAssets.MagicPixel.Value, rect, Color.Yellow * 0.5f);
+            rect.Inflate(2, 2);
+            sb.DrawRectBorder(rect, Color.Magenta * 0.9f, 2);
+        }
+
+        if (drawHoveredPos is not null)
+        {
+            Rectangle rect = new(
+                (int)(drawHoveredPos.Value.X * 16 - Main.screenPosition.X),
+                (int)(drawHoveredPos.Value.Y * 16 - Main.screenPosition.Y),
+                16, 16
+            );
+            rect.Inflate(4, 4);
+            sb.DrawRectBorder(rect, Color.White * 0.9f, 2);
         }
     }
 
     internal void MouseOver()
     {
         StringBuilder mouseOverText = new();
-        // if (foundSpawnSpots.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var spawnSpot))
-        // {
-        //     spawnSpot.MouseOver(mouseOverText);
-        // }
+        if (foundSpawnSpots.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var spawnSpot))
+        {
+            spawnSpot.MouseOver(mouseOverText);
+        }
 
         if (results.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var spawnResult))
         {
@@ -152,129 +219,26 @@ class SpawnAnalysis
         if (mouseOverText.Length > 0)
         {
             string str = mouseOverText.ToString();
-            int lineCount = str.Count(c => c == '\n');
-
-            if (!str.EndsWith('\n'))
-                lineCount++;
-
-            if (lineCount > LinesPerMouseOverPage)
-            {
-                mouseOverPages = (int)Math.Ceiling((double)lineCount / LinesPerMouseOverPage);
-                currentMouseOverPage = currentMouseOverPage % mouseOverPages;
-
-                MouseState newMouseState = Mouse.GetState();
-
-                if (oldMouseState is not null)
-                {
-                    int scrollDiff = oldMouseState.Value.ScrollWheelValue - newMouseState.ScrollWheelValue;
-                    if (scrollDiff > 0)
-                    {
-                        currentMouseOverPage++;
-                    }
-                    else if (scrollDiff < 0)
-                    {
-                        currentMouseOverPage--;
-                    }
-
-                    if (currentMouseOverPage < 0)
-                    {
-                        currentMouseOverPage = mouseOverPages - 1;
-                    }
-                    else if (currentMouseOverPage >= mouseOverPages)
-                    {
-                        currentMouseOverPage = 0;
-                    }
-                }
-                oldMouseState = newMouseState;
-
-                int startLine = currentMouseOverPage * LinesPerMouseOverPage;
-                int endLine = (currentMouseOverPage+1) * LinesPerMouseOverPage;
-
-                int startPos = 0;
-                int endPos = str.Length;
-
-                int line = 0;
-                for (int i = 0; i < str.Length; i++)
-                {
-                    if (str[i] != '\n')
-                        continue;
-
-                    line++;
-
-                    if (line == startLine)
-                    {
-                        startPos = i+1;
-                    }
-                    if (line == endLine)
-                    {
-                        endPos = i;
-                        break;
-                    }
-                }
-
-                str = str[startPos .. endPos].TrimEnd();
-                str = $"{str}\n--- Page {currentMouseOverPage+1}/{mouseOverPages}, use mouse wheel to scroll";
-            }
-
             Main.instance.MouseTextHackZoom(str, 0);
             Main.mouseText = true;
         }
     }
 }
 
-class SpawnAnalysisResult
+public class SpawnAnalysisResult
 {
     public Dictionary<int, SpawnAnalysisResultSpawn> spawns = new();
 
     public void MouseOver(StringBuilder text)
     {
-        foreach (KeyValuePair<int, SpawnAnalysisResultSpawn> kvp in spawns.OrderByDescending(p => p.Value.chance + p.Value.leakedSpawnChance))
-        {
-            var (type, spawn) = kvp;
-
-            if (spawn.leakedSpawnCount > 0)
-            {
-                text.Append("[c/ff0000:");
-                if (spawn.count == 0)
-                {
-                    text.Append("< ");
-                    text.Append((spawn.leakedSpawnChance*100).ToString("0.000"));
-                    text.Append('%');
-                }
-                else
-                {
-                    text.Append("> ");
-                    text.Append((spawn.chance*100).ToString("0.000"));
-                    text.Append('%');
-                }
-                text.Append(']');
-            }
-            else
-            {
-                text.Append((spawn.chance*100).ToString("0.000"));
-                text.Append('%');
-            }
-
-            int totalcount = spawn.count + spawn.leakedSpawnCount;
-
-            text.Append(" : ");
-            
-            if (NPCID.Search.TryGetName(type, out string name))
-            {
-                text.Append(name);
-            }
-            else
-            {
-                text.Append("Id ");
-                text.Append(type);
-            }
-            text.AppendLine();
-        }
+        text.AppendLine($"{spawns.Count} different mobs spawn here");
     }
 }
 
-class SpawnAnalysisResultSpawn
+public class SpawnAnalysisResultSpawn
 {
+    public int npcId;
+
     public float chance;
     public int count;
 
@@ -282,4 +246,9 @@ class SpawnAnalysisResultSpawn
     public int leakedSpawnCount;
 
     public bool dependsOnLuck;
+
+    public SpawnAnalysisResultSpawn(int npcId)
+    {
+        this.npcId = npcId;
+    }
 }

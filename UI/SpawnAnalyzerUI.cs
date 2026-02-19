@@ -1,7 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 using Terraria.Audio;
+using Terraria.GameContent.Generation.Dungeon.Halls;
 using Terraria.GameContent.LootSimulation.LootSimulatorConditionSetterTypes;
 using Terraria.GameContent.UI;
 using Terraria.GameContent.UI.Elements;
@@ -20,6 +24,21 @@ public class SpawnAnalyzerUI : UIState
     public static bool Visible => ui.CurrentState is not null;
 
     static Vector2 MouseScreenRelative => Main.MouseScreen / Main.ScreenSize.ToVector2();
+
+    static Point? lastSelectedPos;
+    static Point? selectedPos;
+
+    static public Point? SelectedPos { 
+        get => selectedPos; 
+        set {
+            selectedPos = value;
+            if (Visible && lastSelectedPos != selectedPos)
+            {
+                lastSelectedPos = selectedPos;
+                instance!.NewPosSelected(selectedPos);
+            }
+        }
+    }
 
     Vector2 TopLeftRelative
     {
@@ -47,10 +66,16 @@ public class SpawnAnalyzerUI : UIState
     Vector2? mainPanelGrabPos;
     bool grabbedResizer;
 
-    const float MinWindowSize = 200f;
-    const float ResizerSize = 20f;
+    Vector2? oldSize;
 
     UIPanel mainPanel;
+
+    UIItemList spawnButtonsContainer;
+
+    HashSet<UIElement> grabDragElements = new();
+
+    const float MinWindowSize = 200f;
+    const float ResizerSize = 20f;
 
     public SpawnAnalyzerUI()
     {
@@ -65,7 +90,17 @@ public class SpawnAnalyzerUI : UIState
             Height = new(0, 1),
         };
 
+        spawnButtonsContainer = new()
+        {
+            Width = new(0, 1),
+            Height = new(0, 1),
+        };
+        mainPanel.Append(spawnButtonsContainer);
+
         Append(mainPanel);
+
+        grabDragElements.Add(mainPanel);
+        grabDragElements.Add(spawnButtonsContainer);
     }
 
     public static void Open()
@@ -76,6 +111,12 @@ public class SpawnAnalyzerUI : UIState
         instance ??= new();
 
         ui.SetState(instance);
+
+        if (lastSelectedPos != selectedPos)
+        {
+            lastSelectedPos = selectedPos;
+            instance.NewPosSelected(selectedPos);
+        }
 
         SoundEngine.PlaySound(SoundID.MenuOpen);
     }
@@ -158,12 +199,13 @@ public class SpawnAnalyzerUI : UIState
     {
         base.Update(gameTime);
 
-        if (mainPanelGrabPos is null && mainPanel.IsMouseHovering && !PlayerInput.Triggers.Old.MouseLeft && PlayerInput.Triggers.Current.MouseLeft)
+        if (mainPanelGrabPos is null && grabDragElements.Any(e => e.IsMouseHovering) && !PlayerInput.Triggers.Old.MouseLeft && PlayerInput.Triggers.Current.MouseLeft)
         {
             bool noChildrenHover = true;
-            foreach (UIElement item in mainPanel.Children)
+            foreach (UIElement container in grabDragElements)
+            foreach (UIElement child in container.Children)
             {
-                if (item.IsMouseHovering)
+                if (child.IsMouseHovering && !grabDragElements.Contains(child))
                 {
                     noChildrenHover = false;
                     break;
@@ -224,6 +266,15 @@ public class SpawnAnalyzerUI : UIState
             }
 
         }
+    
+        // Vector2 size1 = GetDimensions().ToRectangle().Size();
+        // if (oldSize is null)
+        //     oldSize = size1;
+        // else if (Math.Abs(size1.X - oldSize.Value.X) > 1 || Math.Abs(size1.Y - oldSize.Value.Y) > 1)
+        // {
+        //     oldSize = size1;
+        //     Resized();
+        // }
     }
 
     public override void Draw(SpriteBatch spriteBatch)
@@ -233,5 +284,20 @@ public class SpawnAnalyzerUI : UIState
             Main.LocalPlayer.mouseInterface = true;
         }
         base.Draw(spriteBatch);
+    }
+
+    void NewPosSelected(Point? pos)
+    {
+        spawnButtonsContainer.RemoveAllChildren();
+
+        if (pos is not null && (SpawnAnalyzer.LastAnalysis?.results.TryGetValue(pos.Value, out SpawnAnalysisResult? result) ?? false))
+        {
+            foreach (var spawn in result.spawns.Values)
+            {
+                spawnButtonsContainer.Append(new NPCSpawnButton(spawn));
+            }
+        }
+
+        spawnButtonsContainer.RecalculateChildren();
     }
 }

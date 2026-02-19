@@ -41,7 +41,7 @@ namespace SpawnAnalyzer;
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
 public class SpawnAnalyzer
 {
-    static SpawnAnalysis? LastAnalysis;
+    public static SpawnAnalysis? LastAnalysis;
 
     internal delegate bool GetSpawnTileParams(NPC.Spawner spawner, Player player, ref int x, ref int y, Rectangle spawnArea, Rectangle safeArea, out SpawnParamsStage1 spawnParams);
     internal static readonly GetSpawnTileParams GetSpawnTileParamsImpl = GetSpawnTileParamsRewriter.GenerateMethod();
@@ -56,6 +56,7 @@ public class SpawnAnalyzer
     internal static readonly SpawnAnNPCRewriteData SpawnAnNpcRewrite = SpawnAnNPCRewriter.RewriteMethod(null);
 
     internal static Hook? MainUpdateHook;
+    internal static Hook? MainUpdateUIStatesHook;
     internal static Hook? MainDrawMouseOverHook;
     internal static Hook? MainSetupDrawInterfaceLayersHook;
     internal static Hook? NPCSpawnerSpawnNPCHook;
@@ -64,11 +65,10 @@ public class SpawnAnalyzer
 
     static Dictionary<string, Texture2D> TextureCache = new();
 
-    static int AnalyzeInTicks = -1;
     public static void InstallVanilla()
     {
         MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("Update"), On_Main_Update);
-        MainUpdateHook = new Hook(Utils.GetMethodOrThrow<Main>("UpdateUIStates"), On_Main_UpdateUIStates);
+        MainUpdateUIStatesHook = new Hook(Utils.GetMethodOrThrow<Main>("UpdateUIStates"), On_Main_UpdateUIStates);
         MainDrawMouseOverHook = new Hook(Utils.GetMethodOrThrow<Main>("DrawMouseOver"), On_Main_DrawMouseOver);
         MainSetupDrawInterfaceLayersHook = new Hook(Utils.GetMethodOrThrow<Main>("SetupDrawInterfaceLayers"), On_Main_SetupDrawInterfaceLayers);
 
@@ -411,7 +411,7 @@ public class SpawnAnalyzer
     {
         orig(self, time);
 
-        if (AnalyzeInTicks == 0 || (Main.keyState.IsKeyDown(Keys.Z) && !Main.oldKeyState.IsKeyDown(Keys.Z)))
+        if (Main.keyState.IsKeyDown(Keys.Z) && !Main.oldKeyState.IsKeyDown(Keys.Z))
         {
             if (Main.keyState.PressingShift())
             {
@@ -421,11 +421,6 @@ public class SpawnAnalyzer
             {
                 BeginAnalyze(Main.player[Main.myPlayer]);
             }
-        }
-
-        if (AnalyzeInTicks >= 0)
-        {
-            AnalyzeInTicks -= 1;
         }
     }
 
@@ -465,7 +460,6 @@ public class SpawnAnalyzer
             return true;
         }, InterfaceScaleType.UI));
     }
-
 
     delegate NPC orig_NPC_Spawner_SpawnNPC(NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static NPC On_NPC_Spawner_SpawnNPC(orig_NPC_Spawner_SpawnNPC orig, NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
