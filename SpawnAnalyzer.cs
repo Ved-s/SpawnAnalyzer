@@ -95,7 +95,7 @@ public class SpawnAnalyzer
         return texture;
     }
 
-    public static void AnalyzeSimulationResults(List<SimulationNode?> nodes, int entryNode, int entryNodeTimeline, Action<(NextSpawn, NodeRollParams, float)> consumer)
+    public static void AnalyzeSimulationResults(List<SimulationNode?> nodes, int entryNode, int entryNodeTimeline, Action<(NextSpawn, NodeRollInfo, float)> consumer)
     {
         // (node, timeline, branch, chance)
         Stack<(int, int, int, float)> exploreStack = new();
@@ -118,7 +118,7 @@ public class SpawnAnalyzer
             {
                 foreach (var spawn in branchv.spawns)
                 {
-                    consumer((spawn, timelinev.rollParams, chance));
+                    consumer((spawn, branchv.rollInfo, chance));
                 }
             }
 

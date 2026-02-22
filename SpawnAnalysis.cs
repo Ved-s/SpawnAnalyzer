@@ -34,6 +34,8 @@ public class SpawnAnalysis
     public readonly int spawnRate;
     public readonly int maxSpawns;
 
+    Point? lastHoveredSpot;
+
     public SpawnAnalysis(Player player)
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -127,7 +129,7 @@ public class SpawnAnalysis
         Point mouseWorldPos = Main.MouseWorld.ToPoint() / new Point(16, 16);
 
         Point? drawUISelectedPos = null;
-        Point? drawHoveredPos = null;
+        Point? hoveredPos = null;
 
         foreach (Point pos in allSpots)
         {
@@ -161,7 +163,7 @@ public class SpawnAnalysis
             bool hover = mouseWorldPos == pos;
             if (hover && SpawnAnalyzerUI.Visible)
             {
-                drawHoveredPos = pos;
+                hoveredPos = pos;
             }
             else
             {
@@ -191,16 +193,21 @@ public class SpawnAnalysis
             sb.DrawRectBorder(rect, Color.Magenta * 0.9f, 2);
         }
 
-        if (drawHoveredPos is not null)
+        if (hoveredPos is not null)
         {
+            if (lastHoveredSpot != hoveredPos)
+                SoundEngine.PlaySound(SoundID.MenuTick);
+
             Rectangle rect = new(
-                (int)(drawHoveredPos.Value.X * 16 - Main.screenPosition.X),
-                (int)(drawHoveredPos.Value.Y * 16 - Main.screenPosition.Y),
+                (int)(hoveredPos.Value.X * 16 - Main.screenPosition.X),
+                (int)(hoveredPos.Value.Y * 16 - Main.screenPosition.Y),
                 16, 16
             );
             rect.Inflate(4, 4);
             sb.DrawRectBorder(rect, Color.White * 0.9f, 2);
         }
+
+        lastHoveredSpot = hoveredPos;
     }
 
     internal void MouseOver()

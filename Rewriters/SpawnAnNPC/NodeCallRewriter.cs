@@ -277,7 +277,7 @@ class NodeRewriter
         MethodInfo getCurrentTimelineState = Utils.GetMethodOrThrow<SpawnSimulationContext>("GetCurrentTimelineState");
 
         while (c.TryGotoNext(
-            x=>x.MatchLdfld(out field) && spawnerChanceFields.Any(field.Is)
+            x => x.MatchLdfld(out field) && spawnerChanceFields.Any(field.Is)
         ))
         {
             Instruction ldfld = c.Next!;
@@ -285,7 +285,8 @@ class NodeRewriter
             if (c.Prev?.MatchLdarg(0) ?? false)
             {
                 c.Goto(c.Prev);
-                if (!c.IncomingLabels.Any()) {
+                if (!c.IncomingLabels.Any())
+                {
                     c.Remove();
                     needsPop = false;
                 }
@@ -318,7 +319,7 @@ class NodeRewriter
             c.Emit(OpCodes.Ldloca, tempNullBoolVar);
             c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_HasValue"));
             c.Emit(OpCodes.Brfalse, node);
-            
+
             c.Emit(OpCodes.Ldloca, tempNullBoolVar);
             c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_Value"));
             c.Emit(OpCodes.Br, result);
@@ -462,8 +463,8 @@ class NodeRewriter
     private ParamProvider<int> CreateSingleIntProvider(ILCursor c)
     {
         int staticValue = 0;
-        if (c.IncomingLabels.Count() == 0 
-         && c.Index > 0 
+        if (c.IncomingLabels.Count() == 0
+         && c.Index > 0
          && SpawnAnalyzer.MatchInstructions(
             c.Context, c.Index, out _,
             x => x.MatchLdcI4(out staticValue)
@@ -715,7 +716,7 @@ abstract class ParamProvider<T>
 {
     public abstract NodeParameterInputBehavior ParameterInputBehavior { get; }
 
-    public abstract T Provide(object paramInput, NodeRollParams rollParams);
+    public abstract T Provide(object paramInput, NodeRollInfo rollParams);
 }
 
 struct ValueRange
@@ -811,7 +812,7 @@ class StaticParamProvider<T> : ParamProvider<T>
 
     public override NodeParameterInputBehavior ParameterInputBehavior => NodeParameterInputBehavior.AlwaysNull;
 
-    public override T Provide(object _paramInput, NodeRollParams _rollParams)
+    public override T Provide(object _paramInput, NodeRollInfo _rollParams)
     {
         return value;
     }
@@ -821,7 +822,7 @@ class RuntimeParamVarCastParamProvider<T> : ParamProvider<T>
 {
     public override NodeParameterInputBehavior ParameterInputBehavior => NodeParameterInputBehavior.LoadFromParamVar;
 
-    public override T Provide(object paramInput, NodeRollParams _rollParams)
+    public override T Provide(object paramInput, NodeRollInfo _rollParams)
     {
         return (T)paramInput;
     }
@@ -857,43 +858,43 @@ class OneParamRandomNextNode : SimulationNodeImpl
         return new(param, handler, luckDependance);
     }
 
-    public static float? LuckChanceMod(float chance, LuckDependance dep, float luck, NodeRollParams rollParams)
+    public static float? LuckChanceMod(float chance, LuckDependance dep, float luck, out bool dependsOnLuck)
     {
+        dependsOnLuck = false;
         switch (dep)
         {
             case LuckDependance.None:
                 return chance;
 
             case LuckDependance.GoodLuck:
-                rollParams.dependsOnLuck = true;
+                dependsOnLuck = true;
                 return chance * SpawnAnalyzer.PredictLuckChanceMod(luck);
 
             case LuckDependance.BadLuck:
-                rollParams.dependsOnLuck = true;
+                dependsOnLuck = true;
                 return chance * SpawnAnalyzer.PredictLuckChanceMod(-luck);
 
             case LuckDependance.OnlyBadLuck:
-                rollParams.dependsOnLuck = true;
+                dependsOnLuck = true;
                 if (luck < 0)
                     return chance * SpawnAnalyzer.PredictLuckChanceMod(-luck);
                 return chance;
 
             case LuckDependance.BadLuckExtreme:
-                rollParams.dependsOnLuck = true;
+                dependsOnLuck = true;
                 return chance * SpawnAnalyzer.PredictBadLuckExtremeChanceMod(luck);
 
             case LuckDependance.OnlyBadLuckExtreme:
-                rollParams.dependsOnLuck = true;
+                dependsOnLuck = true;
                 if (luck >= 0)
                     return null;
                 return chance * SpawnAnalyzer.PredictBadLuckExtremeChanceMod(luck);
         }
-        ;
 
         return chance;
     }
 
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches)
+    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
     {
         int value = Math.Max(1, this.param.Provide(param, rollParams));
 
@@ -902,8 +903,16 @@ class OneParamRandomNextNode : SimulationNodeImpl
             case ValueHandlerType.ZeroOrNonzero:
 
                 float hitChance = 1f / value;
+                bool dependsOnLuck;
 
-                float? tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
+                float? tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
+
+                Action<SpawnSimulationContext>? onHitLuckyBranch = null;
+                if (dependsOnLuck) {
+                    onHitLuckyBranch = (SpawnSimulationContext ctx) => {
+                        ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
+                    };
+                }
 
                 if (tryhitChance is null)
                 {
@@ -920,6 +929,7 @@ class OneParamRandomNextNode : SimulationNodeImpl
                         new BranchInfo() {
                             chance = tryhitChance.Value,
                             returnValue = 0,
+                            onBranchSelected = onHitLuckyBranch,
                         },
                         new BranchInfo() {
                             chance = 1f - tryhitChance.Value,
@@ -933,7 +943,13 @@ class OneParamRandomNextNode : SimulationNodeImpl
 
                 hitChance = (float)(handler.value + 1) / value;
 
-                tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, rollParams);
+                tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
+                onHitLuckyBranch = null;
+                if (dependsOnLuck) {
+                    onHitLuckyBranch = (SpawnSimulationContext ctx) => {
+                        ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
+                    };
+                }
 
                 if (tryhitChance is null)
                 {
@@ -950,6 +966,7 @@ class OneParamRandomNextNode : SimulationNodeImpl
                         new BranchInfo() {
                             chance = tryhitChance.Value,
                             returnValue = handler.value,
+                            onBranchSelected = onHitLuckyBranch,
                         },
                         new BranchInfo() {
                             chance = 1f - tryhitChance.Value,
@@ -1002,7 +1019,7 @@ class TwoParamRandomNextNode : SimulationNodeImpl
         return new(param, handler);
     }
 
-    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollParams rollParams, out BranchInfo[] branches)
+    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
     {
         var (start, end) = this.param.Provide(param, rollParams);
 
@@ -1071,7 +1088,7 @@ class SelectRandomNode : SimulationNodeImpl
         throw new ArgumentException($"Don't know how to enumerate ints from {param.GetType()}");
     }
 
-    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollParams rollParams, out BranchInfo[] branches)
+    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
     {
         IEnumerable<int> values = GetIntEnumerable(param, out int length);
 
@@ -1109,7 +1126,7 @@ class RandomDragonflyTypeNode : SimulationNodeImpl
         this.param = param;
     }
 
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches)
+    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
     {
         int tileType = this.param.Provide(param, rollParams);
 
@@ -1223,7 +1240,7 @@ class FieldChanceNode : SimulationNodeImpl
         this.setTrue = setTrue;
     }
 
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches)
+    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
     {
         float chance = getChance(context.chances);
 
@@ -1234,7 +1251,7 @@ class FieldChanceNode : SimulationNodeImpl
                     chance = 1f,
                     returnValue = 1,
                     onBranchSelected = setTrue,
-                }  
+                }
             ];
         }
         else if (chance <= 0f)
@@ -1244,7 +1261,7 @@ class FieldChanceNode : SimulationNodeImpl
                     chance = 1f,
                     returnValue = 0,
                     onBranchSelected = setFalse,
-                }  
+                }
             ];
         }
         else
@@ -1259,7 +1276,7 @@ class FieldChanceNode : SimulationNodeImpl
                     chance = 1f - chance,
                     returnValue = 0,
                     onBranchSelected = setFalse,
-                } 
+                }
             ];
         }
     }

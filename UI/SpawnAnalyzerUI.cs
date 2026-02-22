@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 using Terraria.Audio;
+using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Generation.Dungeon.Halls;
 using Terraria.GameContent.LootSimulation.LootSimulatorConditionSetterTypes;
 using Terraria.GameContent.UI;
@@ -27,6 +28,8 @@ public class SpawnAnalyzerUI : UIState
 
     static Point? lastSelectedPos;
     static Point? selectedPos;
+
+    static bool uiToggleButtonHovered;
 
     static public Point? SelectedPos { 
         get => selectedPos; 
@@ -66,23 +69,29 @@ public class SpawnAnalyzerUI : UIState
     Vector2? mainPanelGrabPos;
     bool grabbedResizer;
 
-    Vector2? oldSize;
 
     UIPanel mainPanel;
 
     UIItemList spawnButtonsContainer;
+    UIVerticalScrollArea spawnButtonsContainerScroll;
+
+    UIPanel sidePanel;
+    UIElement? sidePanelTraits;
+
+    Selection<NPCSpawnButton> spawnButtonSelection;
 
     HashSet<UIElement> grabDragElements = new();
 
-    const float MinWindowSize = 200f;
-    const float ResizerSize = 20f;
+    Texture2D grabber = SpawnAnalyzer.GetTexture("UIGrabber");
+
+    const float SidePanelWidth = 200;
 
     public SpawnAnalyzerUI()
     {
         Top = new(0f, .35f);
         Left = new(0f, .35f);
-        Width = new(MinWindowSize, .3f);
-        Height = new(MinWindowSize, .3f);
+        Width = new(SidePanelWidth + 12 * 2 + 10 * 2 + NPCSpawnButton.FixedWidth + 20f, .3f);
+        Height = new(200, .3f);
 
         mainPanel = new()
         {
@@ -92,15 +101,36 @@ public class SpawnAnalyzerUI : UIState
 
         spawnButtonsContainer = new()
         {
-            Width = new(0, 1),
+            AutoHeight = true,
+        };
+
+        spawnButtonsContainerScroll = new(spawnButtonsContainer)
+        {
+            Width = new(-SidePanelWidth - 10, 1),
             Height = new(0, 1),
         };
-        mainPanel.Append(spawnButtonsContainer);
+
+        mainPanel.Append(spawnButtonsContainerScroll);
+
+        sidePanel = new()
+        {
+            Left = new(-SidePanelWidth, 1),
+            Height = new(0, 1),
+            Width = new(SidePanelWidth, 0),  
+        };
+        sidePanel.SetPadding(6);
+
+        mainPanel.Append(sidePanel);
 
         Append(mainPanel);
 
+        spawnButtonSelection = new();
+        spawnButtonSelection.OnSelectionChanged += OnSpawnButtonSelected;
+
         grabDragElements.Add(mainPanel);
         grabDragElements.Add(spawnButtonsContainer);
+        grabDragElements.Add(spawnButtonsContainerScroll);
+        grabDragElements.Add(sidePanel);
     }
 
     public static void Open()
@@ -184,6 +214,9 @@ public class SpawnAnalyzerUI : UIState
 
         if (hover)
         {
+            if (!uiToggleButtonHovered)
+                SoundEngine.PlaySound(SoundID.MenuTick);
+            
             Main.LocalPlayer.mouseInterface = true;
             string text = Visible ? "Close spawn analyzer" : "Open spawn analyzer";
             Main.instance.MouseTextNoOverride(text);
@@ -193,6 +226,8 @@ public class SpawnAnalyzerUI : UIState
                 Toggle();
             }
         }
+
+        uiToggleButtonHovered = hover;
     }
 
     public override void Update(GameTime gameTime)
@@ -201,17 +236,28 @@ public class SpawnAnalyzerUI : UIState
 
         if (mainPanelGrabPos is null && grabDragElements.Any(e => e.IsMouseHovering) && !PlayerInput.Triggers.Old.MouseLeft && PlayerInput.Triggers.Current.MouseLeft)
         {
-            bool noChildrenHover = true;
+            bool canGrab = false;
             foreach (UIElement container in grabDragElements)
-            foreach (UIElement child in container.Children)
             {
-                if (child.IsMouseHovering && !grabDragElements.Contains(child))
+                if (!container.IsMouseHovering)
+                    continue;
+                
+                bool noContainerChildrenHover = true;
+                foreach (UIElement child in container.Children)
                 {
-                    noChildrenHover = false;
+                    if (child.IsMouseHovering)
+                    {
+                        noContainerChildrenHover = false;
+                        break;
+                    }
+                }
+                if (noContainerChildrenHover)
+                {
+                    canGrab = true;
                     break;
                 }
             }
-            if (noChildrenHover)
+            if (canGrab)
             {
                 Vector2 size = SizeAbsolute;
                 Vector2 topLeft = TopLeftAbsolute;
@@ -224,8 +270,8 @@ public class SpawnAnalyzerUI : UIState
                 if (mouseScreen.X > center.X && mouseScreen.Y > center.Y)
                 {
 
-                    if (bottomRight.X - mouseScreen.X <= ResizerSize
-                     && bottomRight.Y - mouseScreen.Y <= ResizerSize
+                    if (bottomRight.X - mouseScreen.X <= grabber.Width
+                     && bottomRight.Y - mouseScreen.Y <= grabber.Height
                     )
                     {
                         grabbedResizer = true;
@@ -266,15 +312,6 @@ public class SpawnAnalyzerUI : UIState
             }
 
         }
-    
-        // Vector2 size1 = GetDimensions().ToRectangle().Size();
-        // if (oldSize is null)
-        //     oldSize = size1;
-        // else if (Math.Abs(size1.X - oldSize.Value.X) > 1 || Math.Abs(size1.Y - oldSize.Value.Y) > 1)
-        // {
-        //     oldSize = size1;
-        //     Resized();
-        // }
     }
 
     public override void Draw(SpriteBatch spriteBatch)
@@ -284,20 +321,126 @@ public class SpawnAnalyzerUI : UIState
             Main.LocalPlayer.mouseInterface = true;
         }
         base.Draw(spriteBatch);
+
+        Rectangle dims = GetOuterDimensions().ToRectangle();
+
+        Rectangle grabberRect = new(dims.Right - grabber.Width, dims.Bottom - grabber.Height, grabber.Width, grabber.Height);
+
+        spriteBatch.Draw(grabber, grabberRect, Color.White);
     }
 
     void NewPosSelected(Point? pos)
     {
+        int? selectednpcid = spawnButtonSelection.CurrentSelection?.spawn.npcId;
         spawnButtonsContainer.RemoveAllChildren();
+        bool clearSelection = true;
 
         if (pos is not null && (SpawnAnalyzer.LastAnalysis?.results.TryGetValue(pos.Value, out SpawnAnalysisResult? result) ?? false))
         {
-            foreach (var spawn in result.spawns.Values)
+            foreach (var spawn in result.spawns.Values.OrderByDescending(s => s.chance + s.leakedSpawnChance))
             {
-                spawnButtonsContainer.Append(new NPCSpawnButton(spawn));
+                NPCSpawnButton button = new(spawn, spawnButtonSelection);
+
+                spawnButtonsContainer.Append(button);
+
+                if (selectednpcid == spawn.npcId)
+                {
+                    spawnButtonSelection.CurrentSelection = button;
+                    clearSelection = false;
+                }
+
             }
         }
 
         spawnButtonsContainer.RecalculateChildren();
+        if (clearSelection)
+            spawnButtonSelection.CurrentSelection = null;
+    }
+
+    void OnSpawnButtonSelected(NPCSpawnButton? button)
+    {
+        if (sidePanelTraits is not null)
+            grabDragElements.Remove(sidePanelTraits);
+
+        sidePanel.RemoveAllChildren();
+        sidePanelTraits = null;
+
+        if (button is null)
+            return;
+
+        var spawn = button.spawn;
+
+        sidePanel.Append(new UIText(Lang.GetNPCName(spawn.npcId))
+        {
+            Top = new(4, 0),
+            Width = new(0, 1),
+            Height = new(30, 0),
+        });
+        
+        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(spawn.npcId))
+        {
+            Top = new(20, 0),
+            Width = new(0, 1),
+            Height = new(64, 0),
+            ForceHover = true,
+        });
+
+        sidePanel.Append(new UIText($"Chance:")
+        {
+            Top = new(90, 0),
+            Width = new(0, 1),
+            Height = new(30, 0),
+            TextOriginX = 0,
+        });
+
+        sidePanel.Append(new UIText($"{spawn.chance * 100:0.0000}%")
+        {
+            Top = new(90, 0),
+            Width = new(0, 1),
+            Height = new(30, 0),
+            TextOriginX = 1,
+        });
+
+        sidePanelTraits = new UIElement()
+        {
+            Top = new(116, 0),
+            Width = new(0, 1),
+            Height = new(0, 1),
+        };
+        sidePanel.Append(sidePanelTraits);
+        grabDragElements.Add(sidePanelTraits);
+
+        float traitsY = 0;
+
+        if (spawn.dependsOnLuck)
+        {
+            UIPanel luckTraitPanel = new()
+            {
+                Width = new(0, 1),
+                Height = new(32, 0),
+                Top = new(traitsY, 0),
+            };
+            traitsY += luckTraitPanel.Height.Pixels + 10;
+            luckTraitPanel.SetPadding(0);
+            sidePanelTraits.Append(luckTraitPanel);
+
+            Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
+
+            luckTraitPanel.Append(new UIImage(luck)
+            {
+                Top = new(0, 0),
+                Left = new(2, 0),
+                RemoveFloatingPointsFromDrawPosition = true,
+            });
+
+            luckTraitPanel.Append(new UIText("Affected by luck")
+            {
+                Top = new(8, 0),
+                Left = new(0, 0),
+                Width = new(-6, 1),
+                Height = new(30, 0),
+                TextOriginX = 1,
+            });
+        }
     }
 }

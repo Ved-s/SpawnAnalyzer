@@ -27,6 +27,8 @@ public class SpawnSimulationContext
     NodeConnection? currentConnection = null;
     int? foundInitialNode = null;
 
+    public NodeConnection? CurrentConnection => currentConnection;
+
     [ThreadStatic]
     static SpawnSimulationContext? currentlySimulatingContext;
 
@@ -100,14 +102,14 @@ public class SpawnSimulationContext
 
         if ((populatedNodes[index]?.timelines.Count ?? 0) <= currentTimeline)
         {
-            NodeRollParams rollParams = new();
+            NodeRollInfo rollInfo = currentConnection?.rollInfo.Clone() ?? new();
 
-            runData.Nodes[index].node.NodeHit(this, param, rollParams, out BranchInfo[] branchInfos);
+            runData.Nodes[index].node.NodeHit(this, param, rollInfo, out BranchInfo[] branchInfos);
             var branches = new NodeConnection[branchInfos.Length];
 
             for (int b = 0; b < branches.Length; b++)
             {
-                branches[b] = new(branchInfos[b], index, currentTimeline, b);
+                branches[b] = new(branchInfos[b], b == 0 ? rollInfo : rollInfo.Clone(), index, currentTimeline, b);
             }
 
             // Console.WriteLine($"New node timeline {index}/{currentTimeline} with {branches.Length} branches");
@@ -126,7 +128,7 @@ public class SpawnSimulationContext
 
             SimulationTimelineState newTimelineState = prevTimelineState?.Clone() ?? new();
 
-            var newTimeline = new SimulationNodeTimeline(branches, rollParams, runData.LocalStateType.Clone(localState!), stackStateClone, newTimelineState);
+            var newTimeline = new SimulationNodeTimeline(branches, runData.LocalStateType.Clone(localState!), stackStateClone, newTimelineState);
 
             populatedNodes[index]!.timelines.Add(newTimeline);
         }
@@ -190,13 +192,17 @@ public class SpawnSimulationContext
         return type.Clone(state);
     }
 
-    public SimulationTimelineState? GetCurrentTimelineState()
+    public SimulationNodeTimeline? GetCurrentTimeline()
     {
-        // Console.WriteLine("GetCurrentTimelineState");
         if (currentConnection is null)
             return null;
         
-        return populatedNodes[currentConnection.startNode]!.timelines[currentConnection.startNodeTimeline].timelineState;
+        return populatedNodes[currentConnection.startNode]!.timelines[currentConnection.startNodeTimeline];
+    }
+
+    public SimulationTimelineState? GetCurrentTimelineState()
+    {
+        return GetCurrentTimeline()?.timelineState;
     }
 
     public SimulationResult? Simulate()
@@ -356,7 +362,7 @@ public class SimulationTimelineState
 
 public abstract class SimulationNodeImpl
 {
-    public abstract void NodeHit(SpawnSimulationContext context, object param, NodeRollParams rollParams, out BranchInfo[] branches);
+    public abstract void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches);
 }
 
 public struct BranchInfo
@@ -382,6 +388,8 @@ public class NodeConnection
     public int startNodeBranch;
 
     public BranchInfo info;
+
+    public NodeRollInfo rollInfo;
 
     public NodeConnectionType ConnectionType
     {
@@ -412,9 +420,10 @@ public class NodeConnection
     public NextNode? nextNode;
     public List<NextSpawn>? spawns;
 
-    public NodeConnection(BranchInfo info, int node, int timeline, int branch)
+    public NodeConnection(BranchInfo info, NodeRollInfo rollInfo, int node, int timeline, int branch)
     {
         this.info = info;
+        this.rollInfo = rollInfo;
         startNode = node;
         startNodeTimeline = timeline;
         startNodeBranch = branch;
@@ -450,20 +459,29 @@ public class SimulationNodeTimeline
     public object localState;
     public object? stackState;
     public SimulationTimelineState timelineState;
-    public NodeRollParams rollParams;
     public NodeConnection[] branches;
 
-    public SimulationNodeTimeline(NodeConnection[] branches, NodeRollParams rollParams, object localState, object? stackState, SimulationTimelineState timelineState)
+    public SimulationNodeTimeline(NodeConnection[] branches, object localState, object? stackState, SimulationTimelineState timelineState)
     {
         this.branches = branches;
-        this.rollParams = rollParams;
         this.localState = localState;
         this.stackState = stackState;
         this.timelineState = timelineState;
     }
 }
 
-public class NodeRollParams
+public class NodeRollInfo
 {
-    public bool dependsOnLuck;
+    public bool dependsOnLuck = false;
+
+    static Func<object, object> CloneImpl = StateType.GenerateCloneMethod(typeof(NodeRollInfo));
+
+    public NodeRollInfo()
+    {
+    }
+
+    public NodeRollInfo Clone()
+    {
+        return (NodeRollInfo)CloneImpl(this);
+    }
 }
