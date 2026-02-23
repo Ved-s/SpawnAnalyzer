@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using Terraria;
 using Terraria.GameContent.Events;
+using Terraria.ID;
 
 namespace SpawnAnalyzer.Simulation;
 
@@ -566,5 +567,26 @@ public static class TestMethods
         int y = TestMethod11Helper(false, v);
 
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, x + y, 0, 0f, 0f, 0f, 0f, 255);
+    }
+
+    public static void TestMethod12(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
+        if (spawner.RollLuck(NPC.goldCritterChance) == 0)
+		{
+			spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 601, 0, 0f, 0f, 0f, 0f, 255);
+		}
+		else
+		{
+			spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, Utils.SelectRandom(Main.rand, [NPCID.RedDragonfly, NPCID.BlueDragonfly]), 0, 0f, 0f, 0f, 0f, 255);
+		}
+		if (Main.rand.Next(3) == 0)
+		{
+			spawner.SpawnNPC(spawnTileX * 16 + 8 - 16, spawnTileY * 16, Utils.SelectRandom(Main.rand, [NPCID.RedDragonfly, NPCID.BlueDragonfly]), 0, 0f, 0f, 0f, 0f, 255);
+		}
+		if (Main.rand.Next(3) == 0)
+		{
+			spawner.SpawnNPC(spawnTileX * 16 + 8 + 16, spawnTileY * 16, Utils.SelectRandom(Main.rand, [NPCID.RedDragonfly, NPCID.BlueDragonfly]), 0, 0f, 0f, 0f, 0f, 255);
+			return;
+		}
     }
 }

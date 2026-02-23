@@ -40,6 +40,8 @@ class NodeRewriter
         { OpCodes.Blt_S,    EqualityType.Lt },
         { OpCodes.Blt_Un,   EqualityType.Lt },
         { OpCodes.Blt_Un_S, EqualityType.Lt },
+        { OpCodes.Clt,      EqualityType.Lt },
+        { OpCodes.Clt_Un,   EqualityType.Lt },
 
         { OpCodes.Ble,      EqualityType.Le },
         { OpCodes.Ble_S,    EqualityType.Le },
@@ -50,6 +52,8 @@ class NodeRewriter
         { OpCodes.Bgt_S,    EqualityType.Gt },
         { OpCodes.Bgt_Un,   EqualityType.Gt },
         { OpCodes.Bgt_Un_S, EqualityType.Gt },
+        { OpCodes.Cgt,      EqualityType.Gt },
+        { OpCodes.Cgt_Un,   EqualityType.Gt },
 
         { OpCodes.Bge,      EqualityType.Ge },
         { OpCodes.Bge_S,    EqualityType.Ge },

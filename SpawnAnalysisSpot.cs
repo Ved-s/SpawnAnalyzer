@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using Microsoft.Xna.Framework;
 using SpawnAnalyzer.Simulation;
 using Terraria;
+using Terraria.ID;
 using Terraria.Map;
 
 namespace SpawnAnalyzer;
@@ -57,41 +59,67 @@ public class SpawnAnalysisSpot
         SimulationResult? results = simulationContext.Simulate();
         if (results is null)
             return;
-        
-        SpawnAnalyzer.AnalyzeSimulationResults(results.Value.nodes, results.Value.startNode, 0, v =>
+
+        AnalyzedSpawns spawnresults = SpawnNodeAnalyzer.Analyze(results.Value);
+
+        Dictionary<AnalyzedMultiSpawn, int> nextPosDict = new();
+
+        Dictionary<Point, List<AnalyzedSpawn>> spawnsByTile = new();
+
+        foreach (var mspawn in spawnresults.spawns.Values)
         {
-            var (spawn, rollParams, chance) = v;
+            nextPosDict.Clear();
+            spawnsByTile.Clear();
 
-            int x = spawn.x / 16;
-            int y = spawn.y / 16;
-
-            Point pos = new(x, y);
-
-            if (!analysis.results.TryGetValue(pos, out SpawnAnalysisResult? result))
+            foreach (var spawn in mspawn.spawns)
             {
-                result = new();
-                analysis.results.Add(pos, result);
-            }
+                Point pos = spawn.TileWorldPos;
+                if (spawnsByTile.TryGetValue(pos, out var existingTileSpawns))
+                {
+                    bool merged = false;
+                    foreach (var ess in existingTileSpawns)
+                        if (ess.pixelWorldPos == spawn.pixelWorldPos)
+                        {
+                            ess.MergeFrom(spawn);
+                            merged = true;
+                            break;
+                        }
+                    if (merged)
+                        continue;
+                }
+                else
+                {
+                    existingTileSpawns = new();
+                    spawnsByTile.Add(pos, existingTileSpawns);
+                }
 
-            if (!result.spawns.TryGetValue(spawn.npcId, out SpawnAnalysisResultSpawn? resultSpawn))
-            {
-                resultSpawn = new(spawn.npcId);
-                result.spawns.Add(spawn.npcId, resultSpawn);
-            }
+                existingTileSpawns.Add(spawn);
 
-            if (spawn.leakedSpawn)
-            {
-                resultSpawn.leakedSpawnChance += chance;
-                resultSpawn.leakedSpawnCount++;
-            }
-            else
-            {
-                resultSpawn.chance += chance;
-                resultSpawn.count++;
-            }
+                if (!analysis.results.TryGetValue(pos, out var posDict))
+                {
+                    posDict = new();
+                    analysis.results.Add(pos, posDict);
+                }
 
-            resultSpawn.dependsOnLuck |= rollParams.dependsOnLuck;
-        });
+                if (!posDict.TryGetValue(mspawn.id, out var spawnres))
+                {
+                    spawnres = new(mspawn.id);
+                    posDict.Add(mspawn.id, spawnres);
+                }
+
+                if (!nextPosDict.TryGetValue(mspawn, out int index))
+                {
+                    index = 0;
+                }
+
+                if (index >= spawnres.spawns.Count)
+                    spawnres.spawns.Add(spawn);
+                else
+                    spawnres.spawns[index].MergeFrom(spawn);
+
+                nextPosDict[mspawn] = index + 1;
+            }
+        }
     }
 
     internal void MouseOver(StringBuilder mouseOverText)
@@ -102,7 +130,7 @@ public class SpawnAnalysisSpot
         double chancePercent = (double)hits / spawnAreaArea * 100;
 
         mouseOverText.AppendLine($"({chancePercent:0.00}% to be picked to spawn)");
-        
+
     }
 
     void ShallowCloneFields<T>(T from, T to)

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -25,7 +26,7 @@ public class SpawnAnalysis
 
     public readonly Dictionary<Point, SpawnAnalysisSpot> foundSpawnSpots = new();
 
-    public readonly Dictionary<Point, SpawnAnalysisResult> results = new();
+    public readonly Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> results = new();
 
     public readonly NPC.Spawner globalSpawner = new();
 
@@ -90,6 +91,15 @@ public class SpawnAnalysis
         {
             spot.Simulate();
         }
+
+        foreach (var posDict in results.Values)
+        {
+            foreach (var mspawn in posDict.Values)
+            {
+                mspawn.spawns.Sort((a, b) => Math.Sign(b.chance - a.chance));
+            }
+        }
+
         sw.Stop();
         Console.WriteLine($"Simulated {foundSpawnSpots.Count} spawn spots in {sw.Elapsed.TotalMilliseconds:0.00}ms");
     }
@@ -218,9 +228,12 @@ public class SpawnAnalysis
             spawnSpot.MouseOver(mouseOverText);
         }
 
-        if (results.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var spawnResult))
+        if (results.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var posDict))
         {
-            spawnResult.MouseOver(mouseOverText);
+            if (posDict.Count == 1)
+                mouseOverText.AppendLine("1 mob spawns here");
+            else 
+                mouseOverText.AppendLine($"{posDict.Count} unique mobs spawns here");
         }
 
         if (mouseOverText.Length > 0)
@@ -229,33 +242,5 @@ public class SpawnAnalysis
             Main.instance.MouseTextHackZoom(str, 0);
             Main.mouseText = true;
         }
-    }
-}
-
-public class SpawnAnalysisResult
-{
-    public Dictionary<int, SpawnAnalysisResultSpawn> spawns = new();
-
-    public void MouseOver(StringBuilder text)
-    {
-        text.AppendLine($"{spawns.Count} different mobs spawn here");
-    }
-}
-
-public class SpawnAnalysisResultSpawn
-{
-    public int npcId;
-
-    public float chance;
-    public int count;
-
-    public float leakedSpawnChance;
-    public int leakedSpawnCount;
-
-    public bool dependsOnLuck;
-
-    public SpawnAnalysisResultSpawn(int npcId)
-    {
-        this.npcId = npcId;
     }
 }

@@ -1,12 +1,20 @@
 using System;
 using System.Numerics;
 using Microsoft.Xna.Framework.Graphics;
+using Terraria.ID;
 using Terraria.UI;
 
 namespace SpawnAnalyzer.UI;
 
 public class UIItemList : UIElement
 {
+    static Func<UIElement, CalculatedStyle> innerDimensionGetter = 
+        ReflectionHelpers.GenerateInstanceFieldGetter<UIElement, CalculatedStyle>(Utils.GetFieldOrThrow<UIElement>("_innerDimensions"));
+
+    static Action<UIElement, CalculatedStyle> innerDimensionSetter = 
+        ReflectionHelpers.GenerateInstanceFieldSetter<UIElement, CalculatedStyle>(Utils.GetFieldOrThrow<UIElement>("_innerDimensions"));
+
+
     public Vector2 ItemSpacing = new(10);
 
     public int? FixedItemsPerRow = null;
@@ -36,7 +44,21 @@ public class UIItemList : UIElement
             recalcSelfOnly = false;
             return;
         }
+
+        CalculatedStyle? resetDims = null;
+        if (AutoHeight)
+        {
+            resetDims = innerDimensionGetter(this);
+            CalculatedStyle newDims = resetDims.Value;
+            newDims.Height = float.MaxValue;
+            innerDimensionSetter(this, newDims);
+        }
+
         base.RecalculateChildren();
+
+        if (resetDims is not null)
+            innerDimensionSetter(this, resetDims.Value);
+
 
         CalculatedStyle dims = GetInnerDimensions();
 
@@ -71,7 +93,6 @@ public class UIItemList : UIElement
                 y += maxRowHeight + ItemSpacing.Y;
                 maxRowHeight = 0;
                 rowItem = 0;
-
             }
 
             item.Left = new(x, 0);
@@ -81,9 +102,8 @@ public class UIItemList : UIElement
             x += itemDims.Width + ItemSpacing.X;
 
             maxRowHeight = Math.Max(maxRowHeight, itemDims.Height);
+            maxHeight = Math.Max(maxHeight, y + itemDims.Height);
         }
-
-        maxHeight = Math.Max(maxHeight, y + maxRowHeight);
 
         if (AutoHeight)
         {

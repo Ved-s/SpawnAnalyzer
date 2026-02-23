@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using SpawnAnalyzer.Simulation;
 using Terraria;
 using Terraria.Audio;
 using Terraria.GameContent;
@@ -13,7 +14,7 @@ namespace SpawnAnalyzer.UI;
 
 public class NPCSpawnButton : UIElement, ISelectable
 {
-    public readonly SpawnAnalysisResultSpawn spawn;
+    public readonly AnalyzedMultiSpawn spawn;
 
     readonly UIEntityIcon icon;
     readonly UIPanel panel;
@@ -29,14 +30,15 @@ public class NPCSpawnButton : UIElement, ISelectable
     public bool Selected
     {
         get => selected;
-        set {
+        set
+        {
             selected = value;
             panel.BackgroundColor = selected ? hoverColor : normalColor;
             panel.BorderColor = selected ? Color.White : Color.Black;
         }
     }
 
-    public NPCSpawnButton(SpawnAnalysisResultSpawn spawn, Selection<NPCSpawnButton> selection)
+    public NPCSpawnButton(AnalyzedMultiSpawn spawn, Selection<NPCSpawnButton> selection)
     {
         this.spawn = spawn;
         this.selection = selection;
@@ -52,7 +54,7 @@ public class NPCSpawnButton : UIElement, ISelectable
         };
         panel.SetPadding(2);
 
-        icon = new(new UnlockableNPCEntryIcon(spawn.npcId))
+        icon = new(new UnlockableNPCEntryIcon(spawn.id))
         {
             Width = new(68f, 0),
             Height = new(68f, 0),
@@ -68,32 +70,55 @@ public class NPCSpawnButton : UIElement, ISelectable
 
         Rectangle dims = GetDimensions().ToRectangle();
 
-        float chance = spawn.chance * 100;
+        float chance = 0;
+        bool affectedByLuck = false;
 
-        string text;
+        foreach (var spawn in spawn.spawns)
+        {
+            if (spawn.chance > chance)
+                chance = spawn.chance;
+
+            if (spawn.affectedByLuck)
+                affectedByLuck = true;
+        }
+
+        chance *= 100;
+
+        string chanceText;
 
         if (chance >= 100)
         {
-            text = $"{(int)chance}%";
+            chanceText = $"{(int)chance}%";
         }
         else if (chance >= 10)
         {
-            text = $"{chance:0.0}%";
+            chanceText = $"{chance:0.0}%";
+        }
+        else if (chance < 0.0001)
+        {
+            chanceText = $"~ 0%";
         }
         else if (chance < 0.01)
         {
-            text = $"<0.01%";
+            chanceText = $"<0.01%";
         }
         else
         {
-            text = $"{chance:0.00}%";
+            chanceText = $"{chance:0.00}%";
         }
 
-        Vector2 textPos = dims.BottomRight() - new Vector2(5, -7) - FontAssets.MouseText.Value.MeasureString(text);
+        Vector2 chanceTextPos = dims.BottomRight() - new Vector2(5, -7) - FontAssets.MouseText.Value.MeasureString(chanceText);
 
-        ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, text, textPos, Color.White, 0f, Vector2.One, Vector2.One);
+        ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, chanceText, chanceTextPos, Color.White, 0f, Vector2.One, Vector2.One);
 
-        if (spawn.dependsOnLuck)
+        if (spawn.spawns.Count > 1)
+        {
+            string extraText = $"+{spawn.spawns.Count - 1}";
+            Vector2 extraTextPos = dims.BottomRight() - new Vector2(5, 13) - FontAssets.MouseText.Value.MeasureString(extraText);
+            ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, extraText, extraTextPos, Color.White, 0f, Vector2.One, Vector2.One);
+        }
+
+        if (affectedByLuck)
         {
             Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
 

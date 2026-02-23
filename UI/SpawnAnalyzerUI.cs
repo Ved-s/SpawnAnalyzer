@@ -31,9 +31,11 @@ public class SpawnAnalyzerUI : UIState
 
     static bool uiToggleButtonHovered;
 
-    static public Point? SelectedPos { 
-        get => selectedPos; 
-        set {
+    static public Point? SelectedPos
+    {
+        get => selectedPos;
+        set
+        {
             selectedPos = value;
             if (Visible && lastSelectedPos != selectedPos)
             {
@@ -116,7 +118,7 @@ public class SpawnAnalyzerUI : UIState
         {
             Left = new(-SidePanelWidth, 1),
             Height = new(0, 1),
-            Width = new(SidePanelWidth, 0),  
+            Width = new(SidePanelWidth, 0),
         };
         sidePanel.SetPadding(6);
 
@@ -216,7 +218,7 @@ public class SpawnAnalyzerUI : UIState
         {
             if (!uiToggleButtonHovered)
                 SoundEngine.PlaySound(SoundID.MenuTick);
-            
+
             Main.LocalPlayer.mouseInterface = true;
             string text = Visible ? "Close spawn analyzer" : "Open spawn analyzer";
             Main.instance.MouseTextNoOverride(text);
@@ -241,7 +243,7 @@ public class SpawnAnalyzerUI : UIState
             {
                 if (!container.IsMouseHovering)
                     continue;
-                
+
                 bool noContainerChildrenHover = true;
                 foreach (UIElement child in container.Children)
                 {
@@ -331,19 +333,19 @@ public class SpawnAnalyzerUI : UIState
 
     void NewPosSelected(Point? pos)
     {
-        int? selectednpcid = spawnButtonSelection.CurrentSelection?.spawn.npcId;
+        int? selectednpcid = spawnButtonSelection.CurrentSelection?.spawn.id;
         spawnButtonsContainer.RemoveAllChildren();
         bool clearSelection = true;
 
-        if (pos is not null && (SpawnAnalyzer.LastAnalysis?.results.TryGetValue(pos.Value, out SpawnAnalysisResult? result) ?? false))
+        if (pos is not null && (SpawnAnalyzer.LastAnalysis?.results.TryGetValue(pos.Value, out var posDict) ?? false))
         {
-            foreach (var spawn in result.spawns.Values.OrderByDescending(s => s.chance + s.leakedSpawnChance))
+            foreach (var spawn in posDict.Values.OrderByDescending(s => s.spawns.Max(s => s.chance)))
             {
                 NPCSpawnButton button = new(spawn, spawnButtonSelection);
 
                 spawnButtonsContainer.Append(button);
 
-                if (selectednpcid == spawn.npcId)
+                if (selectednpcid == spawn.id)
                 {
                     spawnButtonSelection.CurrentSelection = button;
                     clearSelection = false;
@@ -368,16 +370,16 @@ public class SpawnAnalyzerUI : UIState
         if (button is null)
             return;
 
-        var spawn = button.spawn;
+        var mspawn = button.spawn;
 
-        sidePanel.Append(new UIText(Lang.GetNPCName(spawn.npcId))
+        sidePanel.Append(new UIText(Lang.GetNPCName(mspawn.id))
         {
             Top = new(4, 0),
             Width = new(0, 1),
             Height = new(30, 0),
         });
-        
-        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(spawn.npcId))
+
+        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(mspawn.id))
         {
             Top = new(20, 0),
             Width = new(0, 1),
@@ -385,62 +387,89 @@ public class SpawnAnalyzerUI : UIState
             ForceHover = true,
         });
 
-        sidePanel.Append(new UIText($"Chance:")
-        {
-            Top = new(90, 0),
-            Width = new(0, 1),
-            Height = new(30, 0),
-            TextOriginX = 0,
-        });
+        float y = 90;
 
-        sidePanel.Append(new UIText($"{spawn.chance * 100:0.0000}%")
+        for (int i = 0; i < mspawn.spawns.Count; i++)
         {
-            Top = new(90, 0),
-            Width = new(0, 1),
-            Height = new(30, 0),
-            TextOriginX = 1,
-        });
+            AnalyzedSpawn spawn = mspawn.spawns[i];
 
-        sidePanelTraits = new UIElement()
-        {
-            Top = new(116, 0),
-            Width = new(0, 1),
-            Height = new(0, 1),
-        };
-        sidePanel.Append(sidePanelTraits);
-        grabDragElements.Add(sidePanelTraits);
-
-        float traitsY = 0;
-
-        if (spawn.dependsOnLuck)
-        {
-            UIPanel luckTraitPanel = new()
+            if (i > 0)
             {
+                int spawnnum = i + 1;
+                string spawnnumsuffix = (spawnnum % 10) switch
+                {
+                    1 => "st",
+                    2 => "nd",
+                    3 => "rd",
+                    _ => "th"
+                };
+
+                if (spawnnum > 10 && spawnnum <= 20)
+                {
+                    spawnnumsuffix = "th";
+                }
+
+                y += 10;
+
+                sidePanel.Append(new UIText($"{spawnnum}{spawnnumsuffix} spawn:")
+                {
+                    Top = new(y, 0),
+                    Width = new(0, 1),
+                    Height = new(30, 0),
+                    TextOriginX = 0,
+                });
+
+                y += 20;
+            }
+
+            sidePanel.Append(new UIText($"Chance:")
+            {
+                Top = new(y, 0),
                 Width = new(0, 1),
-                Height = new(32, 0),
-                Top = new(traitsY, 0),
-            };
-            traitsY += luckTraitPanel.Height.Pixels + 10;
-            luckTraitPanel.SetPadding(0);
-            sidePanelTraits.Append(luckTraitPanel);
-
-            Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
-
-            luckTraitPanel.Append(new UIImage(luck)
-            {
-                Top = new(0, 0),
-                Left = new(2, 0),
-                RemoveFloatingPointsFromDrawPosition = true,
+                Height = new(30, 0),
+                TextOriginX = 0,
             });
 
-            luckTraitPanel.Append(new UIText("Affected by luck")
+            sidePanel.Append(new UIText($"{spawn.chance * 100:0.0000}%")
             {
-                Top = new(8, 0),
-                Left = new(0, 0),
-                Width = new(-6, 1),
+                Top = new(y, 0),
+                Width = new(0, 1),
                 Height = new(30, 0),
                 TextOriginX = 1,
             });
+
+            y += 26;
+
+            if (spawn.affectedByLuck)
+            {
+                UIPanel luckTraitPanel = new()
+                {
+                    Width = new(0, 1),
+                    Height = new(32, 0),
+                    Top = new(y, 0),
+                };
+                y += luckTraitPanel.Height.Pixels + 10;
+                luckTraitPanel.SetPadding(0);
+                sidePanel.Append(luckTraitPanel);
+
+                Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
+
+                luckTraitPanel.Append(new UIImage(luck)
+                {
+                    Top = new(0, 0),
+                    Left = new(2, 0),
+                    RemoveFloatingPointsFromDrawPosition = true,
+                });
+
+                luckTraitPanel.Append(new UIText("Affected by luck")
+                {
+                    Top = new(8, 0),
+                    Left = new(0, 0),
+                    Width = new(-6, 1),
+                    Height = new(30, 0),
+                    TextOriginX = 1,
+                });
+            }
         }
     }
 }

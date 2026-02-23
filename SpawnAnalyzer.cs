@@ -23,13 +23,11 @@ using Terraria.UI;
 
 namespace SpawnAnalyzer;
 
-// TODO: Spawner.GetSpawnRate
+// TODO: fix forst rolled dragonfly type being misplaced
 // TODO: Optimize 100% and 0% chances, merge same return value branches
 
 // TODO: warning about side-effects and inconsistent chances
 // TODO: no side effects in the simulated function
-// TODO: function inlining
-// TODO: pX and pY are player.Center tile, display them properly
 // TODO: Spawner.ShouldSpawnInvasionEnemies in SetSpawnFlags
 
 // TODO: nodes for NPCCount
@@ -61,7 +59,6 @@ public class SpawnAnalyzer
     internal static Hook? MainSetupDrawInterfaceLayersHook;
     internal static Hook? NPCSpawnerSpawnNPCHook;
     internal static Hook? NPCNewNPCHook;
-
 
     static Dictionary<string, Texture2D> TextureCache = new();
 
@@ -95,54 +92,7 @@ public class SpawnAnalyzer
         return texture;
     }
 
-    public static void AnalyzeSimulationResults(List<SimulationNode?> nodes, int entryNode, int entryNodeTimeline, Action<(NextSpawn, NodeRollInfo, float)> consumer)
-    {
-        // (node, timeline, branch, chance)
-        Stack<(int, int, int, float)> exploreStack = new();
-
-        var startTimeline = nodes[entryNode]!.timelines[entryNodeTimeline];
-
-        for (int i = 0; i < startTimeline.branches.Length; i++)
-        {
-            exploreStack.Push((entryNode, entryNodeTimeline, i, startTimeline.branches[i].info.chance));
-        }
-
-        while (exploreStack.Count > 0)
-        {
-            var (node, timeline, branch, chance) = exploreStack.Pop();
-
-            var timelinev = nodes[node]!.timelines[timeline];
-            var branchv = timelinev.branches[branch];
-
-            if (branchv.spawns is not null)
-            {
-                foreach (var spawn in branchv.spawns)
-                {
-                    consumer((spawn, branchv.rollInfo, chance));
-                }
-            }
-
-            switch (branchv.ConnectionType)
-            {
-                case NodeConnectionType.RandomNode:
-                    var next = branchv.nextNode!;
-                    var nextTimeline = nodes[next.node]!.timelines[next.timeline];
-                    for (int i = 0; i < nextTimeline.branches.Length; i++)
-                    {
-                        exploreStack.Push((next.node, next.timeline, i, nextTimeline.branches[i].info.chance * chance));
-                    }
-                    break;
-
-                case NodeConnectionType.SpawnNode:
-                    break;
-
-                case NodeConnectionType.NoConnection:
-                    break;
-            }
-        }
-    }
-
-    public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false)
+    public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false, bool printChances = false)
     {
         bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimulationNode?> simNodes, bool report, int depth, ref int faildepth)
         {
@@ -374,6 +324,31 @@ public class SpawnAnalyzer
                             Console.WriteLine();
                         }
                     }
+                }
+            }
+
+            if (printChances)
+            {
+                AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
+
+                Console.WriteLine("Calculated chances:");
+                foreach (var mspawn in spawnChances.spawns.Values.OrderByDescending(s => s.spawns[0].chance))
+                {
+                    Console.Write($"  {NPCID.Search.GetName(mspawn.id)} [{mspawn.id}]: ");
+                    for (int i1 = 0; i1 < mspawn.spawns.Count; i1++)
+                    {
+                        AnalyzedSpawn spawn = mspawn.spawns[i1];
+
+                        if (i1 > 0)
+                            Console.Write(", ");
+                        
+                        Console.Write($"{spawn.chance * 100:0.0}% at {spawn.pixelWorldPos}");
+                        if (spawn.affectedByLuck)
+                            Console.Write($" [luck]");
+                        if (spawn.leaked)
+                            Console.Write($" [leak]");
+                    }
+                    Console.WriteLine();
                 }
             }
 
