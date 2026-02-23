@@ -85,7 +85,7 @@ public class SpawnAnalyzer
 
         Stream stream = typeof(SpawnAnalyzer).Assembly.GetManifestResourceStream($"SpawnAnalyzer.Assets.{path.Replace('/', '.')}.png")
             ?? throw new FileNotFoundException($"Could not find SpawnAnalyzer texture asset: {path}");
-        
+
         texture = Texture2D.FromStream(Main.graphics.GraphicsDevice, stream);
         TextureCache.Add(path, texture);
 
@@ -332,21 +332,35 @@ public class SpawnAnalyzer
                 AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
 
                 Console.WriteLine("Calculated chances:");
-                foreach (var mspawn in spawnChances.spawns.Values.OrderByDescending(s => s.spawns[0].chance))
+                foreach (var mspawn in spawnChances.spawns.Values)
                 {
                     Console.Write($"  {NPCID.Search.GetName(mspawn.id)} [{mspawn.id}]: ");
-                    for (int i1 = 0; i1 < mspawn.spawns.Count; i1++)
+                    bool firstPos = true;
+                    foreach (var kvp in mspawn.spawns)
                     {
-                        AnalyzedSpawn spawn = mspawn.spawns[i1];
-
-                        if (i1 > 0)
+                        if (!firstPos)
                             Console.Write(", ");
-                        
-                        Console.Write($"{spawn.chance * 100:0.0}% at {spawn.pixelWorldPos}");
-                        if (spawn.affectedByLuck)
-                            Console.Write($" [luck]");
-                        if (spawn.leaked)
-                            Console.Write($" [leak]");
+
+                        firstPos = false;
+
+                        Console.Write($"at {kvp.Key} [ ");
+
+                        bool firstSpawn = true;
+                        foreach (var spawn in kvp.Value.spawns)
+                        {
+                            if (!firstSpawn)
+                                Console.Write(", ");
+
+                            firstSpawn = false;
+
+                            Console.Write($"{spawn.chance*100:0.0}%");
+
+                            if (spawn.affectedByLuck)
+                                Console.Write(" (luck)");
+                            if (spawn.leaked)
+                                Console.Write(" (leak)");
+                        }
+                        Console.Write(" ]");
                     }
                     Console.WriteLine();
                 }
@@ -429,7 +443,7 @@ public class SpawnAnalyzer
         }));
 
         int inventoryIndex = layers.FindIndex(l => l.Name == "Vanilla: Inventory");
-        layers.Insert(inventoryIndex+1, new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
+        layers.Insert(inventoryIndex + 1, new LegacyGameInterfaceLayer("SpawnAnalyzer: Overlay", delegate
         {
             SpawnAnalyzerUI.DrawLayer(Main.spriteBatch);
             return true;

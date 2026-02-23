@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using Microsoft.Xna.Framework;
 using SpawnAnalyzer.Simulation;
 using Terraria;
-using Terraria.ID;
-using Terraria.Map;
 
 namespace SpawnAnalyzer;
 
@@ -54,46 +53,22 @@ public class SpawnAnalysisSpot
         simulationContext = new(SpawnAnalyzer.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
     }
 
-    internal void Simulate()
+    internal void Simulate(out TimeSpan analysisTime)
     {
         SimulationResult? results = simulationContext.Simulate();
+        analysisTime = default;
         if (results is null)
             return;
 
+        Stopwatch sw = Stopwatch.StartNew();
         AnalyzedSpawns spawnresults = SpawnNodeAnalyzer.Analyze(results.Value);
-
-        Dictionary<AnalyzedMultiSpawn, int> nextPosDict = new();
-
-        Dictionary<Point, List<AnalyzedSpawn>> spawnsByTile = new();
 
         foreach (var mspawn in spawnresults.spawns.Values)
         {
-            nextPosDict.Clear();
-            spawnsByTile.Clear();
-
-            foreach (var spawn in mspawn.spawns)
+            mspawn.ConvertToTilePos();
+            foreach (var posSpawn in mspawn.spawns)
             {
-                Point pos = spawn.TileWorldPos;
-                if (spawnsByTile.TryGetValue(pos, out var existingTileSpawns))
-                {
-                    bool merged = false;
-                    foreach (var ess in existingTileSpawns)
-                        if (ess.pixelWorldPos == spawn.pixelWorldPos)
-                        {
-                            ess.MergeFrom(spawn);
-                            merged = true;
-                            break;
-                        }
-                    if (merged)
-                        continue;
-                }
-                else
-                {
-                    existingTileSpawns = new();
-                    spawnsByTile.Add(pos, existingTileSpawns);
-                }
-
-                existingTileSpawns.Add(spawn);
+                var (pos, spawn) = posSpawn;
 
                 if (!analysis.results.TryGetValue(pos, out var posDict))
                 {
@@ -107,19 +82,11 @@ public class SpawnAnalysisSpot
                     posDict.Add(mspawn.id, spawnres);
                 }
 
-                if (!nextPosDict.TryGetValue(mspawn, out int index))
-                {
-                    index = 0;
-                }
-
-                if (index >= spawnres.spawns.Count)
-                    spawnres.spawns.Add(spawn);
-                else
-                    spawnres.spawns[index].MergeFrom(spawn);
-
-                nextPosDict[mspawn] = index + 1;
+                spawnres.MergeFrom(spawn);
             }
         }
+        sw.Stop();
+        analysisTime = sw.Elapsed;
     }
 
     internal void MouseOver(StringBuilder mouseOverText)

@@ -86,10 +86,12 @@ public class SpawnAnalysis
     {
         results.Clear();
 
+        TimeSpan totalAnalysisTime = default;
         Stopwatch sw = Stopwatch.StartNew();
         foreach (SpawnAnalysisSpot spot in foundSpawnSpots.Values)
         {
-            spot.Simulate();
+            spot.Simulate(out var at);
+            totalAnalysisTime += at;
         }
 
         foreach (var posDict in results.Values)
@@ -101,7 +103,7 @@ public class SpawnAnalysis
         }
 
         sw.Stop();
-        Console.WriteLine($"Simulated {foundSpawnSpots.Count} spawn spots in {sw.Elapsed.TotalMilliseconds:0.00}ms");
+        Console.WriteLine($"Simulated {foundSpawnSpots.Count} spawn spots in {sw.Elapsed.TotalMilliseconds:0.00}ms (with {totalAnalysisTime.TotalMilliseconds:0.00}ms spent analyzing)");
     }
 
     public void DrawOverlay(SpriteBatch sb)
@@ -232,7 +234,7 @@ public class SpawnAnalysis
         {
             if (posDict.Count == 1)
                 mouseOverText.AppendLine("1 mob spawns here");
-            else 
+            else
                 mouseOverText.AppendLine($"{posDict.Count} unique mobs spawns here");
         }
 
