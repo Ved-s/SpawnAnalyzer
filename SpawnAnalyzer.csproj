@@ -1,42 +1,103 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <TerrariaPath>/home/ved-s/.steam/debian-installation/steamapps/common/Terraria</TerrariaPath>
     <ImplicitUsings>disable</ImplicitUsings>
     <Configuration>Release</Configuration>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <GenerateDependencyFile>false</GenerateDependencyFile>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Reference Include="MonoMod.RuntimeDetour">
-      <HintPath>$(TerrariaPath)/MonoMod.RuntimeDetour.dll</HintPath>
+  <Import Project="Configuration.prop" />
+
+  <PropertyGroup Condition="'$(PackageLibraries)' == 'true'">
+    <DefineConstants>$(DefineConstants);PACKAGE_LIBRARIES</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TerrariaFlavor)' == 'vanillaWindows'">
+    <TargetFramework>net48</TargetFramework>
+    <TerrariaExecutable>Terraria.exe</TerrariaExecutable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TerrariaFlavor)' == 'vanillaNonWindows'">
+    <TargetFramework>net48</TargetFramework>
+    <TerrariaExecutable>Terraria.exe</TerrariaExecutable>
+    <FNAPath>$(TerrariaPath)/FNA.dll</FNAPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TerrariaFlavor)' == 'tModLoaderNetcore'">
+    <TargetFramework>net8.0</TargetFramework>
+    <TerrariaExecutable>TerrariaRelease.dll</TerrariaExecutable>
+    <FNAPath>$(TerrariaPath)/Libraries/FNA/1.0.0/FNA.dll</FNAPath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TerrariaFlavor)' == 'vanillaWindows'">
+    <Reference Include="Microsoft.Xna.Framework">
+      <HintPath>lib/Microsoft.Xna.Framework.ref.dll</HintPath>
     </Reference>
-    <Reference Include="MonoMod.Core">
-      <HintPath>$(TerrariaPath)/MonoMod.Core.dll</HintPath>
+    <Reference Include="Microsoft.Xna.Framework.Game">
+      <HintPath>lib/Microsoft.Xna.Framework.Game.ref.dll</HintPath>
     </Reference>
-    <Reference Include="MonoMod.Utils">
-      <HintPath>$(TerrariaPath)/MonoMod.Utils.dll</HintPath>
-    </Reference>
-    <Reference Include="Mono.Cecil">
-      <HintPath>$(TerrariaPath)/Mono.Cecil.dll</HintPath>
-    </Reference>
-    <Reference Include="Terraria">
-      <HintPath>$(TerrariaPath)/TerrariaRelease.dll</HintPath>
+    <Reference Include="Microsoft.Xna.Framework.Graphics">
+      <HintPath>lib/Microsoft.Xna.Framework.Graphics.ref.dll</HintPath>
     </Reference>
     <Reference Include="ReLogic">
-      <HintPath>$(TerrariaPath)/ReLogic.dll</HintPath>
+      <HintPath>lib/ReLogic.$(TerrariaFlavor).ref.dll</HintPath>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TerrariaFlavor)' == 'vanillaNonWindows'">
     <Reference Include="FNA">
-      <HintPath>$(TerrariaPath)/Libraries/FNA/1.0.0/FNA.dll</HintPath>
+      <HintPath>$(FNAPath)</HintPath>
+    </Reference>
+    <Reference Include="ReLogic">
+      <HintPath>lib/ReLogic.$(TerrariaFlavor).ref.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TerrariaFlavor)' == 'tModLoaderNetcore'">
+    <Reference Include="FNA">
+      <HintPath>$(FNAPath)</HintPath>
+    </Reference>
+    <Reference Include="ReLogic">
+      <HintPath>$(TerrariaPath)/Libraries/ReLogic/1.0.0/ReLogic.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PackageLibraries)' == 'true'">
+    <Reference Include="Mono.Cecil">
+      <HintPath>lib/MonoMod.$(TargetFramework)/Mono.Cecil.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Core">
+      <HintPath>lib/MonoMod.$(TargetFramework)/MonoMod.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>lib/MonoMod.$(TargetFramework)/MonoMod.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>lib/MonoMod.$(TargetFramework)/MonoMod.RuntimeDetour.dll</HintPath>
     </Reference>
 
+    <EmbeddedResource Include="lib/MonoMod.$(TargetFramework)/*.dll" />
+
+  </ItemGroup>
+  <ItemGroup Condition="'$(PackageLibraries)' != 'true'">
+    <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Terraria">
+      <HintPath>$(TerrariaPath)/$(TerrariaExecutable)</HintPath>
+    </Reference>
+
+    <EmbeddedResource Include="Assets/*.png" />
+
+    <Compile Remove="lib/**" />
+
     <CopyOutFiles Include="$(OutDir)/SpawnAnalyzer.*" />
-    <EmbeddedResource Include="Assets/*.png"/>
   </ItemGroup>
 
   <Target Name="CopyDll" AfterTargets="AfterBuild">

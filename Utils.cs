@@ -13,7 +13,7 @@ public static class Utils
 
     public static MethodInfo GetMethodOrThrow(this Type type, string name, Type[] args)
     {
-        MethodInfo? m = type.GetMethod(name, (BindingFlags)(-1), args);
+        MethodInfo? m = type.GetMethod(name, (BindingFlags)(-1), null, args, null);
         if (m is not null)
             return m;
 

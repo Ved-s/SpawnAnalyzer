@@ -272,7 +272,7 @@ class NodeRewriter
         List<FieldInfo> spawnerChanceFields = typeof(SpawnerChances)
             .GetFields()
             .Where(f => !f.IsStatic && f.Name.EndsWith("Chance"))
-            .Select(f => typeof(NPC.Spawner).GetField(f.Name[..^6], (BindingFlags)(-1)))
+            .Select(f => typeof(NPC.Spawner).GetField(f.Name.Substring(0, f.Name.Length - 6), (BindingFlags)(-1)))
             .Where(f => f is not null)
             .ToList()!;
 
@@ -303,7 +303,13 @@ class NodeRewriter
 
             c.Remove();
 
-            StackValue[] stackValues = stack.LookupInstruction(ldfld, out _)!.outValues[..^1].ToArray();
+            List<StackValue> outValues = stack.LookupInstruction(ldfld, out _)!.outValues;
+
+            StackValue[] stackValues = new StackValue[outValues.Count - 1];
+            for (int i = 0; i < stackValues.Length; i++)
+            {
+                stackValues[i] = outValues[i];
+            }
 
             ILLabel stateNonNull = c.DefineLabel();
             ILLabel node = c.DefineLabel();

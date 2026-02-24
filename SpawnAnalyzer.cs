@@ -23,7 +23,6 @@ using Terraria.UI;
 
 namespace SpawnAnalyzer;
 
-// TODO: fix forst rolled dragonfly type being misplaced
 // TODO: Optimize 100% and 0% chances, merge same return value branches
 
 // TODO: warning about side-effects and inconsistent chances
@@ -141,9 +140,9 @@ public class SpawnAnalyzer
                         }
 
                         bool spawnsOk = true;
-                        foreach (var (a, b) in n.spawns!.Zip(branch.Item2))
+                        for (int k = 0; k < n.spawns!.Count; k++)
                         {
-                            if (a.npcId != b)
+                            if (n.spawns[k].npcId != branch.Item2[k])
                             {
                                 spawnsOk = false;
                                 break;

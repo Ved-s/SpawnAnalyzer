@@ -1,0 +1,13 @@
+<Project>
+    <PropertyGroup Condition="'$(ExtConfig)' != 'false'">
+
+        <!-- path to the Terraria directory --> 
+        <TerrariaPath>/home/ved-s/.steam/debian-installation/steamapps/common/Terraria</TerrariaPath>
+
+        <!-- valid values: vanillaWindows, vanillaNonWindows, tModLoaderNetcore --> 
+        <TerrariaFlavor>vanillaWindows</TerrariaFlavor>
+
+        <!-- whether to package MonoMod into the mod, or it will be present at the runtime --> 
+        <PackageLibraries>true</PackageLibraries>
+    </PropertyGroup>
+</Project>

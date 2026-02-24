@@ -45,7 +45,12 @@ public static class CallInliner
             if (!resolved.IsStatic)
                 paramCount++;
 
-            StackValue[] paramValues = stackinfo.inValues[^paramCount..].ToArray();
+            StackValue[] paramValues = new StackValue[paramCount];
+            int start = stackinfo.inValues.Count - paramCount;
+            for (int j = 0; j < paramCount; j++)
+            {
+                paramValues[j] = stackinfo.inValues[start + j];
+            }
 
             InlineParameter[] inlineParams = new InlineParameter[paramCount];
 

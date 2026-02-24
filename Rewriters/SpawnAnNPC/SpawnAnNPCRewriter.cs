@@ -154,7 +154,7 @@ public class SpawnAnNPCRewriter
             Utils.GetMethodOrThrow<WorldGen>("SolidTile", [typeof(int), typeof(int), typeof(bool)]),
             Utils.GetMethodOrThrow<Collision>("SolidTiles", [typeof(int), typeof(int), typeof(int), typeof(int)]),
 
-            Utils.GetMethodOrThrow(typeof(RuntimeHelpers), "InitializeArray"),
+            Utils.GetMethodOrThrow(typeof(RuntimeHelpers), "InitializeArray", [typeof(Array), typeof(RuntimeFieldHandle)]),
         ];
 
         NodeRewriter nodeRewriter = new(
@@ -374,7 +374,7 @@ public class SpawnAnNPCRewriter
                 {
                     if (
                         declaringType == typeof(Math)
-                     || declaringType == typeof(MathF)
+                     || declaringType.FullName == "System.MathF"
                      || (declaringType.IsGenericType && declaringType.GetGenericTypeDefinition() == typeof(List<>))
                      || declaringType.IsArray
                     )
@@ -390,7 +390,7 @@ public class SpawnAnNPCRewriter
 
                 if (method.Name.StartsWith("get_")
                  && resolved.DeclaringType is not null
-                 && resolved.DeclaringType.GetProperty(method.Name[4..], (BindingFlags)(-1)) is not null
+                 && resolved.DeclaringType.GetProperty(method.Name.Substring(4), (BindingFlags)(-1)) is not null
                 )
                 {
                     continue;
@@ -415,7 +415,7 @@ public class SpawnAnNPCRewriter
                 InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
                 if (info is not null)
                 {
-                    StackValue inputArray = info.inValues[^3];
+                    StackValue inputArray = info.inValues[info.inValues.Count - 3];
                     if (inputArray.producedBy.Count == 1)
                     {
                         Instruction producer = inputArray.producedBy[0];
@@ -437,7 +437,7 @@ public class SpawnAnNPCRewriter
                                 if (dupInfo is null)
                                     break;
 
-                                StackValue inputValue = dupInfo.inValues[^1];
+                                StackValue inputValue = dupInfo.inValues[info.inValues.Count - 1];
                                 if (inputValue.producedBy.Count != 1)
                                     break;
 

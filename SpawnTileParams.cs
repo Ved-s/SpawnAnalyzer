@@ -85,7 +85,7 @@ public class SpawnerChances
             if (field.IsStatic || !field.Name.EndsWith("Chance") || field.FieldType != typeof(float))
                 continue;
 
-            string spawnerFieldName = field.Name[..^6];
+            string spawnerFieldName = field.Name.Substring(0, field.Name.Length - 6);
             FieldInfo? spawnerField = typeof(NPC.Spawner).GetField(spawnerFieldName, (BindingFlags)(-1));
             if (spawnerField is null || spawnerField.IsStatic || spawnerField.FieldType != typeof(bool))
                 continue;

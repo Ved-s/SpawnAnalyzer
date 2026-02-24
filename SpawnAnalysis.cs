@@ -138,7 +138,9 @@ public class SpawnAnalysis
 
         IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.Keys);
 
-        Point mouseWorldPos = Main.MouseWorld.ToPoint() / new Point(16, 16);
+        Point mouseWorldPos = Main.MouseWorld.ToPoint();
+        mouseWorldPos.X /= 16;
+        mouseWorldPos.Y /= 16;
 
         Point? drawUISelectedPos = null;
         Point? hoveredPos = null;

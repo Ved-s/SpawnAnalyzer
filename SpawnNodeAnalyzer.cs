@@ -182,15 +182,13 @@ public class AnalyzedMultiPosSpawn
     {
         foreach (var kvp in spawn.spawns)
         {
-            var (pos, newSpawns) = kvp;
-
-            if (!spawns.TryGetValue(pos, out var thisSpawns))
+            if (!spawns.TryGetValue(kvp.Key, out var thisSpawns))
             {
-                spawns.Add(pos, newSpawns);
+                spawns.Add(kvp.Key, kvp.Value);
                 continue;
             }
 
-            thisSpawns.AppendFrom(newSpawns);
+            thisSpawns.AppendFrom(kvp.Value);
         }
     }
 
@@ -198,15 +196,13 @@ public class AnalyzedMultiPosSpawn
     {
         foreach (var kvp in spawn.spawns)
         {
-            var (pos, newSpawns) = kvp;
-
-            if (!spawns.TryGetValue(pos, out var thisSpawns))
+            if (!spawns.TryGetValue(kvp.Key, out var thisSpawns))
             {
-                spawns.Add(pos, newSpawns);
+                spawns.Add(kvp.Key, kvp.Value);
                 continue;
             }
 
-            thisSpawns.MergeFrom(newSpawns);
+            thisSpawns.MergeFrom(kvp.Value);
         }
     }
 
@@ -224,17 +220,15 @@ public class AnalyzedMultiPosSpawn
 
         foreach (var kvp in oldSpawns)
         {
-            var (pos, newSpawns) = kvp;
-
-            pos = new(pos.X / 16, pos.Y / 16);
+            Point pos = new(kvp.Key.X / 16, kvp.Key.Y / 16);
 
             if (!spawns.TryGetValue(pos, out var thisSpawns))
             {
-                spawns.Add(pos, newSpawns);
+                spawns.Add(pos, kvp.Value);
                 continue;
             }
 
-            thisSpawns.MergeFrom(newSpawns);
+            thisSpawns.MergeFrom(kvp.Value);
         }
     }
 }

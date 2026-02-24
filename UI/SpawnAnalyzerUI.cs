@@ -140,17 +140,24 @@ public class SpawnAnalyzerUI : UIState
         if (Visible)
             return;
 
-        instance ??= new();
+        try {
 
-        ui.SetState(instance);
+            instance ??= new();
 
-        if (lastSelectedPos != selectedPos)
-        {
-            lastSelectedPos = selectedPos;
-            instance.NewPosSelected(selectedPos);
+            ui.SetState(instance);
+
+            if (lastSelectedPos != selectedPos)
+            {
+                lastSelectedPos = selectedPos;
+                instance.NewPosSelected(selectedPos);
+            }
+
+            SoundEngine.PlaySound(SoundID.MenuOpen);
         }
-
-        SoundEngine.PlaySound(SoundID.MenuOpen);
+        catch (Exception e)
+        {
+            Console.WriteLine($"SpawnAnalyzerUI open exception: {e}");
+        }
     }
 
     public static void Close()

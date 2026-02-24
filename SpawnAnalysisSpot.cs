@@ -68,12 +68,10 @@ public class SpawnAnalysisSpot
             mspawn.ConvertToTilePos();
             foreach (var posSpawn in mspawn.spawns)
             {
-                var (pos, spawn) = posSpawn;
-
-                if (!analysis.results.TryGetValue(pos, out var posDict))
+                if (!analysis.results.TryGetValue(posSpawn.Key, out var posDict))
                 {
                     posDict = new();
-                    analysis.results.Add(pos, posDict);
+                    analysis.results.Add(posSpawn.Key, posDict);
                 }
 
                 if (!posDict.TryGetValue(mspawn.id, out var spawnres))
@@ -82,7 +80,7 @@ public class SpawnAnalysisSpot
                     posDict.Add(mspawn.id, spawnres);
                 }
 
-                spawnres.MergeFrom(spawn);
+                spawnres.MergeFrom(posSpawn.Value);
             }
         }
         sw.Stop();

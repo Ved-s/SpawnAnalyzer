@@ -8,7 +8,7 @@ public static class ReflectionHelpers
 {
     public static Action<Inst, Val> GenerateInstanceFieldSetter<Inst, Val>(FieldInfo field)
     {
-        DynamicMethod dm = new($"FieldSetter<{field.DeclaringType?.FullName}.{field.Name}>", typeof(void), [typeof(Inst), typeof(Val)]);
+        DynamicMethod dm = new($"FieldSetter<{field.DeclaringType?.FullName}.{field.Name}>", typeof(void), [typeof(Inst), typeof(Val)], true);
 
         ILGenerator il = dm.GetILGenerator();
 
@@ -17,12 +17,12 @@ public static class ReflectionHelpers
         il.Emit(OpCodes.Stfld, field);
         il.Emit(OpCodes.Ret);
 
-        return dm.CreateDelegate<Action<Inst, Val>>();
+        return (Action<Inst, Val>)dm.CreateDelegate(typeof(Action<Inst, Val>));
     }
 
     public static Func<Inst, Val> GenerateInstanceFieldGetter<Inst, Val>(FieldInfo field)
     {
-        DynamicMethod dm = new($"FieldGetter<{field.DeclaringType?.FullName}.{field.Name}>", typeof(Val), [typeof(Inst)]);
+        DynamicMethod dm = new($"FieldGetter<{field.DeclaringType?.FullName}.{field.Name}>", typeof(Val), [typeof(Inst)], true);
 
         ILGenerator il = dm.GetILGenerator();
 
@@ -30,6 +30,6 @@ public static class ReflectionHelpers
         il.Emit(OpCodes.Ldfld, field);
         il.Emit(OpCodes.Ret);
 
-        return dm.CreateDelegate<Func<Inst, Val>>();
+        return (Func<Inst, Val>)dm.CreateDelegate(typeof(Func<Inst, Val>));
     }
 }
