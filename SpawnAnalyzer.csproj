@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
@@ -96,11 +95,28 @@
     <EmbeddedResource Include="Assets/*.png" />
 
     <Compile Remove="lib/**" />
+    <Compile Remove="BuildTestData/**" />
+    <None Remove="BuildTestData/**" />
 
     <CopyOutFiles Include="$(OutDir)/SpawnAnalyzer.*" />
   </ItemGroup>
 
-  <Target Name="CopyDll" AfterTargets="AfterBuild">
+  <Target Name="CheckParams" AfterTargets="BeforeBuild">
+    <Error Condition="!Exists('$(TerrariaPath)')" Text="TerrariaPath parameter is not set" />
+    <Error Condition="
+      '$(TerrariaFlavor)' != 'vanillaWindows'
+      And '$(TerrariaFlavor)' != 'vanillaNonWindows'
+      And '$(TerrariaFlavor)' != 'tModLoaderNetcore'
+    " Text="TerrariaFlavor parameter is invalid. Expected 'vanillaWindows', 'vanillaNonWindows' or 'tModLoaderNetcore', got '$(TerrariaFlavor)'" />
+
+    <Message Importance="high" Text="TerrariaPath: $(TerrariaPath)" />
+    <Message Importance="high" Text="TerrariaFlavor: $(TerrariaFlavor)" />
+    <Message Importance="high" Text="FNAPath: $(FNAPath)" />
+    <Message Importance="high" Text="TerrariaExecutable: $(TerrariaExecutable)" />
+    <Message Importance="high" Text="TargetFramework: $(TargetFramework)" />
+  </Target>
+
+  <Target Name="CopyDll" AfterTargets="AfterBuild" Condition="$(CopyOut) != 'false'">
     <Copy SourceFiles="@(CopyOutFiles)" DestinationFolder="$(TerrariaPath)" />
   </Target>
 
