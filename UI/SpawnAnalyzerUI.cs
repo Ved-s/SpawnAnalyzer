@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using SpawnAnalyzer.UI.Tabs;
 using Terraria;
 using Terraria.Audio;
 using Terraria.GameContent.Bestiary;
@@ -71,68 +72,114 @@ public class SpawnAnalyzerUI : UIState
     Vector2? mainPanelGrabPos;
     bool grabbedResizer;
 
+    UIPanelWithTopBorderCutout mainPanel;
 
-    UIPanel mainPanel;
+    Tab? currentTab;
 
-    UIItemList spawnButtonsContainer;
-    UIVerticalScrollArea spawnButtonsContainerScroll;
-
-    UIPanel sidePanel;
-    UIElement? sidePanelTraits;
-
-    Selection<NPCSpawnButton> spawnButtonSelection;
+    List<UISelectableTab> tabs = new();
+    UIElement tabsUi;
+    Selection<UISelectableTab> tabSelection = new();
 
     HashSet<UIElement> grabDragElements = new();
 
     Texture2D grabber = SpawnAnalyzer.GetTexture("UIGrabber");
 
-    const float SidePanelWidth = 200;
+    const float TabSpacing = 4;
 
     public SpawnAnalyzerUI()
     {
         Top = new(0f, .35f);
         Left = new(0f, .35f);
-        Width = new(SidePanelWidth + 12 * 2 + 10 * 2 + NPCSpawnButton.FixedWidth + 20f, .3f);
+        Width = new(12 * 2, .3f);
         Height = new(200, .3f);
 
         mainPanel = new()
         {
             Width = new(0, 1),
-            Height = new(0, 1),
+            Height = new(-32, 1),
+            Top = new(32, 0),
+            CalculateCutout = (out int start, out int length) =>
+            {
+                UIElement? tab = tabSelection.CurrentSelection;
+                start = 0;
+                length = 0;
+                if (tab is null)
+                    return false;
+
+                CalculatedStyle dims = tab.GetDimensions();
+
+                start = (int)dims.X;
+                length = (int)dims.Width;
+                return true;
+            }
         };
-
-        spawnButtonsContainer = new()
-        {
-            AutoHeight = true,
-        };
-
-        spawnButtonsContainerScroll = new(spawnButtonsContainer)
-        {
-            Width = new(-SidePanelWidth - 10, 1),
-            Height = new(0, 1),
-        };
-
-        mainPanel.Append(spawnButtonsContainerScroll);
-
-        sidePanel = new()
-        {
-            Left = new(-SidePanelWidth, 1),
-            Height = new(0, 1),
-            Width = new(SidePanelWidth, 0),
-        };
-        sidePanel.SetPadding(6);
-
-        mainPanel.Append(sidePanel);
-
-        Append(mainPanel);
-
-        spawnButtonSelection = new();
-        spawnButtonSelection.OnSelectionChanged += OnSpawnButtonSelected;
 
         grabDragElements.Add(mainPanel);
-        grabDragElements.Add(spawnButtonsContainer);
-        grabDragElements.Add(spawnButtonsContainerScroll);
-        grabDragElements.Add(sidePanel);
+
+        tabsUi = new()
+        {
+            Width = new(-(70 + 10 + 12), 1),
+            Height = new(32, 0),
+            Left = new(12, 0),
+        };
+
+        tabSelection.OnSelectionChanged += (t) =>
+        {
+            SelectTab(t?.Tag as Tab);  
+        };
+
+        Append(tabsUi);
+        Append(mainPanel);
+
+        UIPanel closeButtonPanel = new()
+        {
+            Width = new(70, 0),
+            Height = new(28, 0),
+            Top = new(2, 0),
+            Left = new(-70, 1),
+        };
+        closeButtonPanel.SetPadding(0);
+        closeButtonPanel.OnLeftClick += (_, _) => Close();
+        closeButtonPanel.OnMouseOver += (_, _) => {
+            closeButtonPanel.BackgroundColor = new Color(83, 102, 171) * 0.7f;
+            SoundEngine.PlaySound(SoundID.MenuTick);
+        };
+        closeButtonPanel.OnMouseOut += (_, _) => {
+            closeButtonPanel.BackgroundColor = new Color(63, 82, 151) * 0.7f;
+        };
+
+        closeButtonPanel.Append(new UIText("Close")
+        {
+            Width = new(0, 1),
+            Height = new(0, 1),
+            TextOriginX = 0.5f,
+            TextOriginY = 0.5f,
+        });
+
+        tabs.Add(new(tabSelection, "Final spawns")
+        {
+            Tag = new FinalSpawnsTab(),
+
+            Width = new(140, 0),
+            Height = new(32, 0),
+        });
+
+        tabs.Add(new(tabSelection, "Test")
+        {
+            Tag = new TestTab(),
+
+            Width = new(140, 0),
+            Height = new(32, 0),
+        });
+
+        Append(closeButtonPanel);
+
+        UpdateTabListUI();
+
+        if (tabs.Count > 0)
+        {
+            tabSelection.CurrentSelection = tabs[0];
+        }
     }
 
     public static void Open()
@@ -140,8 +187,8 @@ public class SpawnAnalyzerUI : UIState
         if (Visible)
             return;
 
-        try {
-
+        try
+        {
             instance ??= new();
 
             ui.SetState(instance);
@@ -243,10 +290,10 @@ public class SpawnAnalyzerUI : UIState
     {
         base.Update(gameTime);
 
-        if (mainPanelGrabPos is null && grabDragElements.Any(e => e.IsMouseHovering) && !PlayerInput.Triggers.Old.MouseLeft && PlayerInput.Triggers.Current.MouseLeft)
+        if (mainPanelGrabPos is null && GetAllGrabDraggableElements().Any(e => e.IsMouseHovering) && !PlayerInput.Triggers.Old.MouseLeft && PlayerInput.Triggers.Current.MouseLeft)
         {
             bool canGrab = false;
-            foreach (UIElement container in grabDragElements)
+            foreach (UIElement container in GetAllGrabDraggableElements())
             {
                 if (!container.IsMouseHovering)
                     continue;
@@ -338,145 +385,93 @@ public class SpawnAnalyzerUI : UIState
         spriteBatch.Draw(grabber, grabberRect, Color.White);
     }
 
-    void NewPosSelected(Point? pos)
+    IEnumerable<UIElement> GetAllGrabDraggableElements()
     {
-        int? selectednpcid = spawnButtonSelection.CurrentSelection?.spawn.id;
-        spawnButtonsContainer.RemoveAllChildren();
-        bool clearSelection = true;
-
-        if (pos is not null && (SpawnAnalyzer.LastAnalysis?.results.TryGetValue(pos.Value, out var posDict) ?? false))
+        IEnumerable<UIElement> en = grabDragElements;
+        if (currentTab is not null)
         {
-            foreach (var spawn in posDict.Values.OrderByDescending(s => s.spawns.Max(s => s.chance)))
-            {
-                NPCSpawnButton button = new(spawn, spawnButtonSelection);
-
-                spawnButtonsContainer.Append(button);
-
-                if (selectednpcid == spawn.id)
-                {
-                    spawnButtonSelection.CurrentSelection = button;
-                    clearSelection = false;
-                }
-
-            }
+            en = en.Concat(currentTab.grabDragElements);
         }
-
-        spawnButtonsContainer.RecalculateChildren();
-        if (clearSelection)
-            spawnButtonSelection.CurrentSelection = null;
+        return en;
     }
 
-    void OnSpawnButtonSelected(NPCSpawnButton? button)
+    Vector2 CalculateMinSize()
     {
-        if (sidePanelTraits is not null)
-            grabDragElements.Remove(sidePanelTraits);
+        float tabsWidth = 0;
+        for (int i = 0; i < tabs.Count; i++)
+        {
+            if (i > 0)
+                tabsWidth += TabSpacing;
+            UIElement tab = tabs[i];
+            tabsWidth += tab.Width.Pixels;
+        }
+        
+        Vector2 thisMin = new(12 + tabsWidth + 10 + 70, 200);
+        if (currentTab is not null)
+        {
+            Vector2 tabMin = currentTab.CalculateMinSize() + new Vector2(12 * 2);
+            thisMin.X = Math.Max(thisMin.X, tabMin.X);
+            thisMin.Y = Math.Max(thisMin.Y, tabMin.Y);
+        }
+        return thisMin;
+    }
 
-        sidePanel.RemoveAllChildren();
-        sidePanelTraits = null;
+    void UpdateMinSize()
+    {
+        // TODO: do better
 
-        if (button is null)
+        Vector2 min = CalculateMinSize();
+        Width.Pixels = min.X;
+        Height.Pixels = min.Y;
+    }
+
+    void UpdateTabListUI()
+    {
+        tabsUi.RemoveAllChildren();
+
+        float x = 0;
+        foreach (UIElement tab in tabs)
+        {
+            x += tab.Width.Pixels + TabSpacing;
+            tabsUi.Append(tab);
+        }
+        float width = Math.Max(0, x - TabSpacing);
+
+        x = -(width/2);
+        foreach (UIElement tab in tabs)
+        {
+            tab.Left = new(x, 0.5f);
+            x += tab.Width.Pixels + TabSpacing;
+        }
+    }
+
+    void SelectTab(Tab? tab)
+    {
+        if (ReferenceEquals(currentTab, tab))
             return;
 
-        var mspawn = button.spawn;
-
-        sidePanel.Append(new UIText(Lang.GetNPCName(mspawn.id))
+        if (currentTab is not null)
         {
-            Top = new(4, 0),
-            Width = new(0, 1),
-            Height = new(30, 0),
-        });
-
-        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(mspawn.id))
-        {
-            Top = new(20, 0),
-            Width = new(0, 1),
-            Height = new(64, 0),
-            ForceHover = true,
-        });
-
-        float y = 90;
-
-        for (int i = 0; i < mspawn.spawns.Count; i++)
-        {
-            AnalyzedSpawn spawn = mspawn.spawns[i];
-
-            if (i > 0)
-            {
-                int spawnnum = i + 1;
-                string spawnnumsuffix = (spawnnum % 10) switch
-                {
-                    1 => "st",
-                    2 => "nd",
-                    3 => "rd",
-                    _ => "th"
-                };
-
-                if (spawnnum > 10 && spawnnum <= 20)
-                {
-                    spawnnumsuffix = "th";
-                }
-
-                y += 10;
-
-                sidePanel.Append(new UIText($"{spawnnum}{spawnnumsuffix} spawn:")
-                {
-                    Top = new(y, 0),
-                    Width = new(0, 1),
-                    Height = new(30, 0),
-                    TextOriginX = 0,
-                });
-
-                y += 20;
-            }
-
-            sidePanel.Append(new UIText($"Chance:")
-            {
-                Top = new(y, 0),
-                Width = new(0, 1),
-                Height = new(30, 0),
-                TextOriginX = 0,
-            });
-
-            sidePanel.Append(new UIText($"{spawn.chance * 100:0.0000}%")
-            {
-                Top = new(y, 0),
-                Width = new(0, 1),
-                Height = new(30, 0),
-                TextOriginX = 1,
-            });
-
-            y += 26;
-
-            if (spawn.affectedByLuck)
-            {
-                UIPanel luckTraitPanel = new()
-                {
-                    Width = new(0, 1),
-                    Height = new(32, 0),
-                    Top = new(y, 0),
-                };
-                y += luckTraitPanel.Height.Pixels + 10;
-                luckTraitPanel.SetPadding(0);
-                sidePanel.Append(luckTraitPanel);
-
-                Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
-
-                luckTraitPanel.Append(new UIImage(luck)
-                {
-                    Top = new(0, 0),
-                    Left = new(2, 0),
-                    RemoveFloatingPointsFromDrawPosition = true,
-                });
-
-                luckTraitPanel.Append(new UIText("Affected by luck")
-                {
-                    Top = new(8, 0),
-                    Left = new(0, 0),
-                    Width = new(-6, 1),
-                    Height = new(30, 0),
-                    TextOriginX = 1,
-                });
-            }
+            grabDragElements.Remove(currentTab);
+            mainPanel.RemoveChild(currentTab);
         }
+
+        currentTab = tab;
+        if (currentTab is not null)
+        {
+            currentTab.Width = new(0, 1);
+            currentTab.Height = new(0, 1);
+            grabDragElements.Add(currentTab);
+            mainPanel.Append(currentTab);
+            currentTab.Recalculate();
+            currentTab.TabSelected(this);
+        }
+
+        UpdateMinSize();
+    }
+
+    void NewPosSelected(Point? pos)
+    {
+        currentTab?.NewPosSelected(pos);
     }
 }
