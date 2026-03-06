@@ -93,6 +93,30 @@ public class SpawnAnalyzerUI : UIState
         Width = new(12 * 2, .3f);
         Height = new(200, .3f);
 
+        tabsUi = new()
+        {
+            Width = new(-(70 + 10 + 12), 1),
+            Height = new(32, 0),
+            Left = new(12, 0),
+        };
+
+        tabSelection.OnSelectionChanged += (t) =>
+        {
+            SelectTab(t?.Tag as Tab);  
+        };
+
+        UIButton closeButton = new("Close")
+        {
+            Width = new(70, 0),
+            Height = new(28, 0),
+            Top = new(2, 0),
+            Left = new(-70, 1),
+        };
+        closeButton.OnLeftClick += (_, _) => Close();
+
+        Append(tabsUi);
+        Append(closeButton);
+
         mainPanel = new()
         {
             Width = new(0, 1),
@@ -117,45 +141,8 @@ public class SpawnAnalyzerUI : UIState
 
         grabDragElements.Add(mainPanel);
 
-        tabsUi = new()
-        {
-            Width = new(-(70 + 10 + 12), 1),
-            Height = new(32, 0),
-            Left = new(12, 0),
-        };
-
-        tabSelection.OnSelectionChanged += (t) =>
-        {
-            SelectTab(t?.Tag as Tab);  
-        };
-
-        Append(tabsUi);
         Append(mainPanel);
 
-        UIPanel closeButtonPanel = new()
-        {
-            Width = new(70, 0),
-            Height = new(28, 0),
-            Top = new(2, 0),
-            Left = new(-70, 1),
-        };
-        closeButtonPanel.SetPadding(0);
-        closeButtonPanel.OnLeftClick += (_, _) => Close();
-        closeButtonPanel.OnMouseOver += (_, _) => {
-            closeButtonPanel.BackgroundColor = new Color(83, 102, 171) * 0.7f;
-            SoundEngine.PlaySound(SoundID.MenuTick);
-        };
-        closeButtonPanel.OnMouseOut += (_, _) => {
-            closeButtonPanel.BackgroundColor = new Color(63, 82, 151) * 0.7f;
-        };
-
-        closeButtonPanel.Append(new UIText("Close")
-        {
-            Width = new(0, 1),
-            Height = new(0, 1),
-            TextOriginX = 0.5f,
-            TextOriginY = 0.5f,
-        });
 
         tabs.Add(new(tabSelection, "Final spawns")
         {
@@ -165,15 +152,13 @@ public class SpawnAnalyzerUI : UIState
             Height = new(32, 0),
         });
 
-        tabs.Add(new(tabSelection, "Test")
+        tabs.Add(new(tabSelection, "Analyzer")
         {
-            Tag = new TestTab(),
+            Tag = new AnalyzerTab(),
 
             Width = new(140, 0),
             Height = new(32, 0),
         });
-
-        Append(closeButtonPanel);
 
         UpdateTabListUI();
 

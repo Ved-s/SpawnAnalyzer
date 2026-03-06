@@ -14,7 +14,7 @@ namespace SpawnAnalyzer.UI.Tabs;
 public class FinalSpawnsTab: Tab
 {
     UIText headerText;
-    UIPanel reAnalyzeButton;
+    UIButton reAnalyzeButton;
 
     UIElement pageContainer;
 
@@ -44,34 +44,19 @@ public class FinalSpawnsTab: Tab
         };
         Append(headerText);
 
-        reAnalyzeButton = new()
+        reAnalyzeButton = new("Re-analyze")
         {
             Width = new(ReCalculateButtonWidth, 0),
             Height = new(28, 0),
             Top = new(4, 0),
             Left = new(-(ReCalculateButtonWidth + 4), 1),
         };
-        reAnalyzeButton.SetPadding(0);
         reAnalyzeButton.OnLeftClick += (_, _) =>
         {
+            SoundEngine.PlaySound(SoundID.MenuTick);
             SpawnAnalyzer.LastAnalysis?.Simulate();
             NewPosSelected(SpawnAnalyzerUI.SelectedPos);
         };
-        reAnalyzeButton.OnMouseOver += (_, _) => {
-            reAnalyzeButton.BackgroundColor = new Color(83, 102, 171) * 0.7f;
-            SoundEngine.PlaySound(SoundID.MenuTick);
-        };
-        reAnalyzeButton.OnMouseOut += (_, _) => {
-            reAnalyzeButton.BackgroundColor = new Color(63, 82, 151) * 0.7f;
-        };
-
-        reAnalyzeButton.Append(new UIText("Re-analyze")
-        {
-            Width = new(0, 1),
-            Height = new(0, 1),
-            TextOriginX = 0.5f,
-            TextOriginY = 0.5f,
-        });
 
         Append(new UIImage(TextureAssets.MagicPixel)
         {

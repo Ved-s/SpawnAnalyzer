@@ -1,6 +1,6 @@
 namespace SpawnAnalyzer.UI.Tabs;
 
-public class TestTab: Tab
+public class AnalyzerTab: Tab
 {
     
 }
