@@ -41,6 +41,11 @@ namespace SpawnAnalyzer;
 // TODO: hovering over a spawn should highlight its spawning and final tiles
 // TODO: textures for overlay instead of rectangles
 
+// TODO: analyzer should be aware of infinite loops
+
+// TODO: track extra spawn params (ai params)
+// TODO: generic rewriter/simulator, simulate slime item, simulate spawner setup methods for valid combinations of states 
+
 public class SpawnAnalyzer
 {
     public static SpawnAnalysis? LastAnalysis;

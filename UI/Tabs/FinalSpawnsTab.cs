@@ -2,16 +2,24 @@ using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
+using Terraria.Audio;
+using Terraria.GameContent;
 using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.UI.Elements;
+using Terraria.ID;
 using Terraria.UI;
 
 namespace SpawnAnalyzer.UI.Tabs;
 
 public class FinalSpawnsTab: Tab
 {
-    UIItemList spawnButtonsContainer;
+    UIText headerText;
+    UIPanel reAnalyzeButton;
+
+    UIElement pageContainer;
+
     UIVerticalScrollArea spawnButtonsContainerScroll;
+    UIItemList spawnButtonsContainer;
 
     UIPanel sidePanel;
     UIElement? sidePanelTraits;
@@ -20,8 +28,74 @@ public class FinalSpawnsTab: Tab
 
     const float SidePanelWidth = 200;
 
+    const float ReCalculateButtonWidth = 102;
+
     public FinalSpawnsTab()
     {
+        headerText = new("")
+        {
+            TextOriginX = 0,
+            TextOriginY = 0,
+
+            Top = new(9, 0),
+            Left = new(6, 0),
+            Width = new(-(ReCalculateButtonWidth + 10), 1),
+            Height = new(20, 0),
+        };
+        Append(headerText);
+
+        reAnalyzeButton = new()
+        {
+            Width = new(ReCalculateButtonWidth, 0),
+            Height = new(28, 0),
+            Top = new(4, 0),
+            Left = new(-(ReCalculateButtonWidth + 4), 1),
+        };
+        reAnalyzeButton.SetPadding(0);
+        reAnalyzeButton.OnLeftClick += (_, _) =>
+        {
+            SpawnAnalyzer.LastAnalysis?.Simulate();
+            NewPosSelected(SpawnAnalyzerUI.SelectedPos);
+        };
+        reAnalyzeButton.OnMouseOver += (_, _) => {
+            reAnalyzeButton.BackgroundColor = new Color(83, 102, 171) * 0.7f;
+            SoundEngine.PlaySound(SoundID.MenuTick);
+        };
+        reAnalyzeButton.OnMouseOut += (_, _) => {
+            reAnalyzeButton.BackgroundColor = new Color(63, 82, 151) * 0.7f;
+        };
+
+        reAnalyzeButton.Append(new UIText("Re-analyze")
+        {
+            Width = new(0, 1),
+            Height = new(0, 1),
+            TextOriginX = 0.5f,
+            TextOriginY = 0.5f,
+        });
+
+        Append(new UIImage(TextureAssets.MagicPixel)
+        {
+            Color = Color.Black * 0.8f,
+
+            Top = new(34, 0),
+            Left = new(4, 0),
+            Width = new(-8, 1),
+            Height = new(2, 0),
+
+            AllowResizingDimensions = false,
+            ScaleToFit = true,
+        });
+
+        pageContainer = new()
+        {
+            Top = new(34, 0),
+            Left = new(0, 0),
+            Width = new(0, 1),  
+            Height = new(-34, 1),  
+        };
+        pageContainer.SetPadding(12);
+        Append(pageContainer);
+
         spawnButtonsContainer = new()
         {
             AutoHeight = true,
@@ -33,7 +107,7 @@ public class FinalSpawnsTab: Tab
             Height = new(0, 1),
         };
 
-        Append(spawnButtonsContainerScroll);
+        pageContainer.Append(spawnButtonsContainerScroll);
 
         sidePanel = new()
         {
@@ -43,11 +117,13 @@ public class FinalSpawnsTab: Tab
         };
         sidePanel.SetPadding(6);
 
-        Append(sidePanel);
+        pageContainer.Append(sidePanel);
 
         spawnButtonSelection = new();
         spawnButtonSelection.OnSelectionChanged += OnSpawnButtonSelected;
 
+        grabDragElements.Add(headerText);
+        grabDragElements.Add(pageContainer);
         grabDragElements.Add(spawnButtonsContainer);
         grabDragElements.Add(spawnButtonsContainerScroll);
         grabDragElements.Add(sidePanel);
@@ -61,7 +137,7 @@ public class FinalSpawnsTab: Tab
         );
     }
 
-    override public void NewPosSelected(Point? pos)
+    public override void NewPosSelected(Point? pos)
     {
         base.NewPosSelected(pos);
 
@@ -82,13 +158,30 @@ public class FinalSpawnsTab: Tab
                     spawnButtonSelection.CurrentSelection = button;
                     clearSelection = false;
                 }
-
             }
+
+            string tileName = TileID.Search.GetName(Main.tile[pos.Value.X, pos.Value.Y].type);
+            
+            string s = "s";
+            if (posDict.Count == 1)
+                s = "";
+
+            headerText.SetText($"{posDict.Count} NPC{s} spawning on {tileName} at {pos.Value.X}, {pos.Value.Y}");
+            if (reAnalyzeButton.Parent is null)
+            {
+                Append(reAnalyzeButton);
+            }
+        }
+        else
+        {
+            headerText.SetText("");
         }
 
         spawnButtonsContainer.RecalculateChildren();
         if (clearSelection)
             spawnButtonSelection.CurrentSelection = null;
+
+        
     }
 
     void OnSpawnButtonSelected(NPCSpawnButton? button)

@@ -35,7 +35,7 @@ public class UIVerticalScrollArea: UIElement
         this.scrollingElement = scrollingElement;
         scrollBar = new();
 
-        scrollBar.Left = new(-scrollBar.Width.Pixels, 1);
+        scrollBar.Left = new(-scrollBar.Width.Pixels - 0.001f, 1);
         scrollBar.Top = new(6, 0);
         scrollBar.Height = new(-12, 1);
 

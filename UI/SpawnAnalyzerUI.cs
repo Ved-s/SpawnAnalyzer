@@ -113,6 +113,7 @@ public class SpawnAnalyzerUI : UIState
                 return true;
             }
         };
+        mainPanel.SetPadding(0);
 
         grabDragElements.Add(mainPanel);
 
