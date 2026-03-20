@@ -30,7 +30,11 @@ public class SpawnsTab : Tab
     UIButton[] displayModeButtons;
     Selection<UIButton> displayModeSelection;
 
-    DisplayMode? displayMode = DisplayMode.Final;
+    UIButton[] chanceModeButtons;
+    Selection<UIButton> chanceModeSelection;
+
+    DisplayMode? displayMode = null;
+    ChanceMode? chanceMode = null;
 
     const float SidePanelWidth = 200;
 
@@ -58,11 +62,19 @@ public class SpawnsTab : Tab
             {
                 DisplayMode.Starting => "Display which NPCs start their spawning on selected tile.\nFor example dragonflies start their spawning underwater,\nbut actually spawn at the nearest cattail.",
                 DisplayMode.Final => "Display which NPCs actually spawn on selected tile",
-                DisplayMode.Total => "Display which NPCs spawn on all found spawning tiles in the spawn area",
+                DisplayMode.Area => "Display which NPCs spawn on all found spawning tiles in the spawn area",
                 _ => throw new IndexOutOfRangeException()
             };
 
-            UIButton button = new(mode.ToString())
+            string name = mode switch
+            {
+                DisplayMode.Starting => "Initial",
+                DisplayMode.Final => "Tile",
+                DisplayMode.Area => "Area",
+                _ => throw new IndexOutOfRangeException()
+            };
+
+            UIButton button = new(name)
             {
                 Top = new(9, 0),
                 Left = new(6 + 120 + i * 100, 0),
@@ -76,19 +88,56 @@ public class SpawnsTab : Tab
             Append(button);
         }
 
+        chanceModeSelection = new();
+        chanceModeSelection.OnSelectionChanged += OnChanceModeButtonSelected;
+        chanceModeButtons = new UIButton[2];
+
+        Append(new UIText("Chance mode")
+        {
+            Top = new(50, 0),
+            Left = new(10, 0),
+            Width = new(120, 0),
+            Height = new(25, 0),
+            TextOriginX = 0,
+        });
+
+        for (int i = 0; i < 2; i++)
+        {
+            ChanceMode mode = (ChanceMode)i;
+
+            string name = mode switch
+            {
+                ChanceMode.Chance => "Chance",
+                ChanceMode.Time => "Average time",
+                _ => throw new IndexOutOfRangeException()
+            };
+
+            UIButton button = new(name)
+            {
+                Top = new(44, 0),
+                Left = new(6 + 120 + i * 150, 0),
+                Width = new(145, 0),
+                Height = new(30, 0),
+                Selection = chanceModeSelection,
+                Tag = mode,
+            };
+            chanceModeButtons[i] = button;
+            Append(button);
+        }
+
         headerText = new("")
         {
             TextOriginX = 0,
             TextOriginY = 0,
 
-            Top = new(44, 0),
+            Top = new(9 + 35 + 35, 0),
             Left = new(10, 0),
             Width = new(-20, 1),
             Height = new(20, 0),
         };
         Append(headerText);
 
-        float pageTop = 9 + 25 + 35;
+        float pageTop = 9 + 25 + 35 + 35;
 
         Append(new UIImage(TextureAssets.MagicPixel)
         {
@@ -131,6 +180,7 @@ public class SpawnsTab : Tab
             Left = new(-SidePanelWidth, 1),
             Height = new(0, 1),
             Width = new(SidePanelWidth, 0),
+            OverflowHidden = true,
         };
         sidePanel.SetPadding(6);
 
@@ -145,6 +195,7 @@ public class SpawnsTab : Tab
         grabDragElements.Add(sidePanel);
 
         UpdateDisplayModeButtons();
+        UpdateChanceModeButtons();
     }
 
     public override Vector2 CalculateMinSize()
@@ -169,13 +220,13 @@ public class SpawnsTab : Tab
         {
             case NewSpawnAnalysisEvent:
                 UpdateDisplayModeButtons();
-                if (displayMode == DisplayMode.Total)
+                if (displayMode == DisplayMode.Area)
                     RebuildSpawnsList();
                 break;
 
             case NewPosSelectedEvent:
                 UpdateDisplayModeButtons();
-                if (displayMode != DisplayMode.Total)
+                if (displayMode != DisplayMode.Area)
                     RebuildSpawnsList();
                 break;
         }
@@ -207,7 +258,7 @@ public class SpawnsTab : Tab
                         results.final.TryGetValue(pos.Value, out spawns);
                     break;
 
-                case DisplayMode.Total:
+                case DisplayMode.Area:
                     spawns = results.total;
                     break;
             }
@@ -217,7 +268,10 @@ public class SpawnsTab : Tab
         {
             foreach (var spawn in spawns.Values.OrderByDescending(s => s.spawns.Max(s => s.chance)))
             {
-                NPCSpawnButton button = new(spawn, spawnButtonSelection);
+                NPCSpawnButton button = new(spawn, spawnButtonSelection)
+                {
+                    ShowChanceAsAverageTime = chanceMode == ChanceMode.Time
+                };
 
                 spawnButtonsContainer.Append(button);
 
@@ -248,7 +302,7 @@ public class SpawnsTab : Tab
                     }
                     break;
 
-                case DisplayMode.Total:
+                case DisplayMode.Area:
                     spawnLocation = $"spawning in the area";
                     break;
             }
@@ -326,6 +380,19 @@ public class SpawnsTab : Tab
                     spawnnumsuffix = "th";
                 }
 
+                sidePanel.Append(new UIImage(TextureAssets.MagicPixel)
+                {
+                    Color = Color.Black * 0.8f,
+
+                    Top = new(y, 0),
+                    Left = new(0, 0),
+                    Width = new(0, 1),
+                    Height = new(2, 0),
+
+                    AllowResizingDimensions = false,
+                    ScaleToFit = true,
+                });
+
                 y += 10;
 
                 sidePanel.Append(new UIText($"{spawnnum}{spawnnumsuffix} spawn:")
@@ -336,7 +403,7 @@ public class SpawnsTab : Tab
                     TextOriginX = 0,
                 });
 
-                y += 20;
+                y += 22;
             }
 
             sidePanel.Append(new UIText($"Chance:")
@@ -355,7 +422,33 @@ public class SpawnsTab : Tab
                 TextOriginX = 1,
             });
 
-            y += 26;
+            y += 20;
+
+            if (displayMode != DisplayMode.Starting)
+            {
+                double avgTicks = 1 / (double)spawn.chance;
+                double avgSeconds = avgTicks / 60;
+
+                sidePanel.Append(new UIText($"Avg. time:")
+                {
+                    Top = new(y, 0),
+                    Width = new(0, 1),
+                    Height = new(30, 0),
+                    TextOriginX = 0,
+                });
+
+                sidePanel.Append(new UIText(NPCSpawnButton.FormatTimeShort(avgSeconds))
+                {
+                    Top = new(y, 0),
+                    Width = new(0, 1),
+                    Height = new(30, 0),
+                    TextOriginX = 1,
+                });
+
+                y += 20;
+            }
+
+            y += 6;
 
             if (spawn.affectedByLuck)
             {
@@ -457,6 +550,106 @@ public class SpawnsTab : Tab
 
         displayMode = mode;
         RebuildSpawnsList();
+        UpdateChanceModeButtons();
+    }
+
+    void UpdateChanceModeButtons()
+    {
+        if (chanceMode is not null && !IsChanceModeValid(chanceMode.Value) || chanceMode is null)
+        {
+            chanceMode = null;
+
+            foreach (UIButton button in chanceModeButtons)
+            {
+                if (button.Tag is not ChanceMode mode)
+                    continue;
+
+                if (!IsChanceModeValid(mode))
+                    continue;
+
+                chanceModeSelection.CurrentSelection = button;
+                break;
+            }
+
+            if (chanceMode is null)
+                chanceModeSelection.CurrentSelection = null;
+        }
+
+        foreach (UIButton button in chanceModeButtons)
+        {
+            if (button.Tag is not ChanceMode mode)
+                continue;
+
+            if (IsChanceModeValid(mode))
+            {
+                if (button.Disabled)
+                {
+                    button.Disabled = false;
+                    button.SetNewText(color: Color.White);
+                }
+            }
+            else
+            {
+                if (!button.Disabled)
+                {
+                    button.Disabled = true;
+                    button.SetNewText(color: Color.Gray);
+                }
+            }
+
+            button.HoverText = null;
+
+            if (mode == ChanceMode.Time)
+            {
+                if (displayMode == DisplayMode.Final)
+                    button.HoverText = "Display average time it takes to NPC to spawn on the\nselected tile each spawn tick (affected by spawn rate)";
+                else if (displayMode == DisplayMode.Area)
+                    button.HoverText = "Display average time it takes to NPC to spawn in the\nentire spawn area (affected by spawn rate)";
+            }
+            else if (mode == ChanceMode.Chance)
+            {
+                if (displayMode == DisplayMode.Starting)
+                    button.HoverText = "Display chance of the NPC spawning when that tile\nis chosen for spawning";
+                else if (displayMode == DisplayMode.Final)
+                    button.HoverText = "Display chance of NPC spawning on the selected tile\neach tick (affected by spawn rate)";
+                else if (displayMode == DisplayMode.Area)
+                    button.HoverText = "Display chance of NPC spawning in the entire spawn\narea each tick (affected by spawn rate).";
+            }
+        }
+    }
+
+    void OnChanceModeButtonSelected(UIButton? button)
+    {
+        ChanceMode? mode = null;
+
+        if (button is not null)
+        {
+            if (button.Tag is ChanceMode mode2)
+            {
+                mode = mode2;
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (mode is not null && !IsChanceModeValid(mode.Value))
+            return;
+
+        chanceMode = mode;
+        UpdateSpawnButtonsChanceMode();
+    }
+
+    void UpdateSpawnButtonsChanceMode()
+    {
+        foreach (UIElement elem in spawnButtonsContainer.Children)
+        {
+            if (elem is not NPCSpawnButton button)
+                continue;
+
+            button.ShowChanceAsAverageTime = chanceMode == ChanceMode.Time;
+        }
     }
 
     bool IsDisplayModeValid(DisplayMode mode)
@@ -473,8 +666,25 @@ public class SpawnsTab : Tab
             case DisplayMode.Final:
                 return SpawnAnalyzerUI.SelectedPos is not null && results.final.ContainsKey(SpawnAnalyzerUI.SelectedPos.Value);
 
-            case DisplayMode.Total:
+            case DisplayMode.Area:
                 return true;
+        }
+
+        return false;
+    }
+
+    bool IsChanceModeValid(ChanceMode mode)
+    {
+        if (displayMode is null)
+            return false;
+
+        switch (mode)
+        {
+            case ChanceMode.Chance:
+                return true;
+
+            case ChanceMode.Time:
+                return displayMode != DisplayMode.Starting;
         }
 
         return false;
@@ -484,6 +694,12 @@ public class SpawnsTab : Tab
     {
         Starting,
         Final,
-        Total
+        Area
+    }
+
+    enum ChanceMode
+    {
+        Time,
+        Chance
     }
 }

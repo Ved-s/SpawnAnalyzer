@@ -17,7 +17,8 @@ public class SpawnAnalysisSpot
     readonly int spawnTileType;
     readonly int spawnWallType;
 
-    public int hits = 1;
+    public ulong hits = 1;
+    public float chance = 0;
 
     readonly bool xRange;
 
@@ -96,11 +97,12 @@ public class SpawnAnalysisSpot
                     finslSpawnsPos.Add(mspawn.id, finalSpawnsId);
                 }
 
-                finalSpawnsId.MergeFrom(posSpawn.Value, true);
                 startSpawnsId.MergeFrom(posSpawn.Value, true);
+
+                posSpawn.Value.MultiplyChance(chance * analysis.spawnRateChanceMultiplier);
+                finalSpawnsId.MergeFrom(posSpawn.Value, true);
                 totalSpawnsId.MergeFrom(posSpawn.Value, false);
             }
-
         }
         sw.Stop();
         analysisTime = sw.Elapsed;
@@ -110,11 +112,7 @@ public class SpawnAnalysisSpot
     {
         mouseOverText.Append($"Mob spawn spot ");
 
-        int spawnAreaArea = analysis.spawnArea.Width * analysis.spawnArea.Height;
-        double chancePercent = (double)hits / spawnAreaArea * 100;
-
-        mouseOverText.AppendLine($"({chancePercent:0.00}% to be picked to spawn)");
-
+        mouseOverText.AppendLine($"({chance * 100:0.00}% to be picked to spawn)");
     }
 
     void ShallowCloneFields<T>(T from, T to)

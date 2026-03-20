@@ -206,11 +206,11 @@ public class AnalyzedMultiPosSpawn
         }
     }
 
-    public void MultiplyChance(float chance)
+    public void MultiplyChance(float mul)
     {
         foreach (var spawnPos in spawns.Values)
             foreach (var spawn in spawnPos.spawns)
-                spawn.chance *= chance;
+                spawn.chance *= mul;
     }
 
     public void ConvertToTilePos()
@@ -264,6 +264,12 @@ public class AnalyzedMultiSpawn
             else
                 spawns[i].MergeFrom(spawn.spawns[i]);
         }
+    }
+
+    public void MultiplyChance(float mul)
+    {
+        foreach (var spawn in spawns)
+            spawn.chance *= mul;
     }
 }
 

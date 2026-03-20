@@ -131,7 +131,7 @@ static class GetSpawnTileParamsRewriter
             IL_01CE: stloc.2
 
             IL_01CF: ldloc.2
-            IL_01D0: ldc.i4.s  50
+            IL_01D0: ldc.i4.s  50       // number of spot pick attempts
             IL_01D2: blt       IL_0011
 
             IL_01D7: ldarg.2

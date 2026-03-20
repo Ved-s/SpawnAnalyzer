@@ -27,6 +27,11 @@ public class NPCSpawnButton : UIElement, ISelectable
     static Color hoverColor = new Color(83, 102, 171) * 0.7f;
     private bool selected;
 
+    /// <summary>
+    /// Treat chance as chance to spawn per tick and show average time for one mob to spawn
+    /// </summary>
+    public bool ShowChanceAsAverageTime;
+
     public bool Selected
     {
         get => selected;
@@ -82,29 +87,18 @@ public class NPCSpawnButton : UIElement, ISelectable
                 affectedByLuck = true;
         }
 
-        chance *= 100;
-
         string chanceText;
 
-        if (chance >= 100)
+        if (ShowChanceAsAverageTime)
         {
-            chanceText = $"{(int)chance}%";
-        }
-        else if (chance >= 10)
-        {
-            chanceText = $"{chance:0.0}%";
-        }
-        else if (chance < 0.0001)
-        {
-            chanceText = $"~ 0%";
-        }
-        else if (chance < 0.01)
-        {
-            chanceText = $"<0.01%";
+            double avgTicks = 1 / (double)chance;
+            double avgSeconds = avgTicks / 60;
+
+            chanceText = FormatTimeShort(avgSeconds);
         }
         else
         {
-            chanceText = $"{chance:0.00}%";
+            chanceText = FormatPercentage(chance);
         }
 
         Vector2 chanceTextPos = dims.BottomRight() - new Vector2(5, -7) - FontAssets.MouseText.Value.MeasureString(chanceText);
@@ -152,5 +146,82 @@ public class NPCSpawnButton : UIElement, ISelectable
         base.LeftClick(evt);
         selection.CurrentSelection = this;
         SoundEngine.PlaySound(SoundID.MenuTick);
+    }
+
+    public static string FormatTimeShort(double seconds)
+    {
+        // n.nnf
+        // nn.nf
+        // nnn...f
+
+        if (seconds < 10) {
+            return $"{seconds:0.00}s";
+        }
+        else if (seconds < 60) {
+            return $"{seconds:0.0}s";
+        }
+
+        double minutes = seconds / 60;
+        if (minutes < 10) {
+            return $"{minutes:0.00}m";
+        }
+        else if (minutes < 60) {
+            return $"{minutes:0.0}m";
+        }
+
+        double hours = seconds / 3600;
+        if (hours < 10) {
+            return $"{hours:0.00}h";
+        }
+        else if (hours < 24) {
+            return $"{hours:0.0}h";
+        }
+
+        double days = seconds / 86400;
+        if (days < 10) {
+            return $"{days:0.00}d";
+        }
+        else if (days < 100) {
+            return $"{days:0.0}d";
+        }
+        else if (days < 365.25) {
+            return $"{(int)days:0}d";
+        }
+
+        double years = seconds / 31557600;
+        if (years < 10) {
+            return $"{years:0.00}y";
+        }
+        else if (years < 100) {
+            return $"{years:0.0}y";
+        }
+
+        return $"{(int)years}y";
+    }
+
+    public static string FormatPercentage(float chance)
+    {
+        chance *= 100;
+
+        if (chance >= 100)
+        {
+            return $"{(int)chance}%";
+        }
+        else if (chance >= 10)
+        {
+            return $"{chance:0.0}%";
+        }
+        else if (chance < 0.0001)
+        {
+            return $"~ 0%";
+        }
+        else if (chance < 0.01)
+        {
+            return $"<0.01%";
+        }
+        else
+        {
+            return $"{chance:0.00}%";
+        }
     }
 }

@@ -34,6 +34,9 @@ public class SpawnAnalysis
 
     public readonly int spawnRate;
     public readonly int maxSpawns;
+
+    public readonly float spawnRateChanceMultiplier;
+
     Point? lastHoveredSpot;
     private readonly SimulatorImpl impl;
 
@@ -50,10 +53,16 @@ public class SpawnAnalysis
 
         impl.GetSpawnRateImpl(globalSpawner, player, out spawnRate, out maxSpawns, globalSpawnerChances);
 
+        spawnRateChanceMultiplier = 1f / spawnRate;
+
+        Console.WriteLine($"SpawnRate: {spawnRate}, spawn tick chance: {spawnRateChanceMultiplier * 100:0.0}%");
+
         // Seems like GetSpawnTileParams only outputs one type of spawn params per tile, pick the first
         // and show warnings on multiple different
 
         bool warning = false;
+
+        ulong validSpawnSpots = 0;
 
         for (int y = spawnArea.Top; y < spawnArea.Bottom; y++)
         {
@@ -63,6 +72,7 @@ public class SpawnAnalysis
                 int yRef = y;
                 if (impl.GetSpawnTileParamsImpl(globalSpawner, player, ref xRef, ref yRef, spawnArea, safeArea, out SpawnParamsStage1 spawnParams))
                 {
+                    validSpawnSpots++;
                     if (!foundSpawnSpots.TryGetValue(new(xRef, yRef), out SpawnAnalysisSpot? spot))
                     {
                         foundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(this, new(xRef, yRef), spawnParams, impl));
@@ -77,6 +87,16 @@ public class SpawnAnalysis
                     }
                 }
             }
+        }
+
+        ulong totalSpawnSpots = (ulong)spawnArea.Height * (ulong)spawnArea.Width;
+        float spotChance = (float)((double)validSpawnSpots / totalSpawnSpots);
+        float chanceMul = SpawnAnalyzer.PredictChooseWithAttemptsChanceMultiplier(spotChance, 50);
+
+        foreach (SpawnAnalysisSpot spot in foundSpawnSpots.Values)
+        {
+            float chance = (float)((double)spot.hits / totalSpawnSpots);
+            spot.chance = chance * chanceMul;
         }
 
         sw.Stop();

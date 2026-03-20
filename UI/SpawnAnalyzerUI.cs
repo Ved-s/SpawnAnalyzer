@@ -177,7 +177,7 @@ public class SpawnAnalyzerUI : UIState
             Height = new(32, 0),
         });
 
-        tabs.Add(new(tabSelection, "Final spawns")
+        tabs.Add(new(tabSelection, "Spawns")
         {
             Tag = new SpawnsTab(),
 

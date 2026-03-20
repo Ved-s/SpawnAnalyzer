@@ -150,7 +150,7 @@ public class UIButton : UIElement, ISelectable
 			DrawPanel(spriteBatch, borderTexture.Value, borderColor);
 
 		if (IsMouseHovering && HoverText is not null)
-			Main.instance.MouseTextNoOverride(HoverText);
+			Main.instance.MouseText(HoverText);
 	}
 
 	public override void MouseOver(UIMouseEvent evt)

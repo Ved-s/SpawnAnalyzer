@@ -611,6 +611,15 @@ public class SpawnAnalyzer
         return a + b - (a * b);
     }
 
+    internal static float PredictChooseWithAttemptsChanceMultiplier(float chancesSum, int attempts)
+    {
+        float remaining = 1 - chancesSum;
+        if (remaining <= 0)
+            return 1;
+
+        return (float)((1 - Math.Pow((double)remaining, attempts)) / chancesSum);
+    }
+
     internal static void ReportUnknownPattern(string type, ILContext c, int index, int showBefore, int showAfter)
     {
         Console.WriteLine($"\n\x1b[1mUnsupported {type} at IL_{c.Instrs[index].Offset:x4}:\x1b[0m");
