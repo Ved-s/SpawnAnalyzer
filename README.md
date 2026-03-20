@@ -2,10 +2,6 @@ This is a mod that analyzes Terraria's NPC spawning system by copying game's spa
 
 The mod is for Terraria 1.4.5 and since tModLoader doesn't support it (yet), so there's no mod structure yet and you have to manually inject it into the game.
 
-
-Currently you have to press Z to analyze spawns, UI is in-progress, the button to open it is under the inventory
-
-
 # Building
 
 Prerequisites: .NET 8 SDK
