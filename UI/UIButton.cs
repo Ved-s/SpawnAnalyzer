@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -14,39 +15,74 @@ using Terraria.UI.Chat;
 
 namespace SpawnAnalyzer.UI;
 
-public class UIButton: UIElement
+public class UIButton : UIElement, ISelectable
 {
-    private readonly int cornerSize = 12;
+	private readonly int cornerSize = 12;
 	private readonly int barSize = 4;
 
 	private readonly Asset<Texture2D> borderTexture;
 	private readonly Asset<Texture2D> backgroundTexture;
 
-    private List<PositionedSnippet> text;
-    private Vector2 textSize;
-    
+	private List<PositionedSnippet> text;
+	private Vector2 textSize;
+
+	private string textString;
+	private Color textColor;
+
 	public Color BorderColor = Color.Black;
 	public Color BackgroundColor = new Color(63, 82, 151) * 0.7f;
 
-    public Color HoverBorderColor = Color.Black;
+	public Color HoverBorderColor = Color.Black;
 	public Color HoverBackgroundColor = new Color(73, 94, 171) * 0.7f;
 
-    public Color ClickBorderColor = Color.Black;
+	public Color ClickBorderColor = Color.Black;
 	public Color ClickBackgroundColor = new Color(68, 88, 161) * 0.7f;
 
-    public Vector2 TextAlign = new(0.5f);
+	public Color SelectedBorderColor = Color.White;
+	public Color SelectedBackgroundColor = new Color(73, 94, 171) * 0.7f;
 
-	public UIButton(string text)
+	public Color DisabledBorderColor = Color.Black;
+	public Color DisabledBackgroundColor = new Color(68, 88, 161) * 0.7f;
+
+	public Vector2 TextAlign = new(0.5f);
+
+	public object? Tag;
+
+	public string? HoverText;
+
+	public Selection<UIButton>? Selection;
+	public bool Selected { get; set; }
+
+	public bool Disabled { get; set; }
+
+	public event Action<UIButton>? OnClick;
+
+	public UIButton(string text, Color? color = null)
 	{
 		borderTexture ??= Main.Assets.Request<Texture2D>("Images/UI/PanelBorder");
 		backgroundTexture ??= Main.Assets.Request<Texture2D>("Images/UI/PanelBackground");
 
-        List<TextSnippet> snippets = ChatManager.ParseMessage(text, Color.White);
-		ChatManager.ConvertNormalSnippets(snippets);
-		this.text = ChatManager.LayoutSnippets(FontAssets.MouseText.Value, snippets, Vector2.One).ToList();
-		textSize = ChatManager.GetStringSize(this.text);
+		textString = text;
+		textColor = color ?? Color.White;
+		UpdateText();
+	}
 
-        textSize.Y = Math.Max(0, textSize.Y - 8);
+	public void SetNewText(string? text = null, Color? color = null)
+	{
+		textString = text ?? textString;
+		textColor = color ?? textColor;
+		UpdateText();
+	}
+
+	[MemberNotNull(nameof(text))]
+	void UpdateText()
+	{
+		List<TextSnippet> snippets = ChatManager.ParseMessage(textString, textColor);
+		ChatManager.ConvertNormalSnippets(snippets);
+		text = ChatManager.LayoutSnippets(FontAssets.MouseText.Value, snippets, Vector2.One).ToList();
+		textSize = ChatManager.GetStringSize(text);
+
+		textSize.Y = Math.Max(0, textSize.Y - 8);
 	}
 
 	private void DrawPanel(SpriteBatch spriteBatch, Texture2D texture, Color color)
@@ -69,44 +105,69 @@ public class UIButton: UIElement
 
 	protected override void DrawSelf(SpriteBatch spriteBatch)
 	{
-        Color borderColor;
-        Color bgColor;
+		Color borderColor;
+		Color bgColor;
 
-        if (IsMouseHovering)
-        {
-            if (Main.mouseLeft)
-            {
-                borderColor = ClickBorderColor;
-                bgColor = ClickBackgroundColor;
-            }
-            else
-            {
-                borderColor = HoverBorderColor;
-                bgColor = HoverBackgroundColor;
-            }
-        }
-        else
-        {
-            borderColor = BorderColor;
-            bgColor = BackgroundColor;
-        }
+		if (Disabled)
+		{
+			borderColor = DisabledBorderColor;
+			bgColor = DisabledBackgroundColor;
+		}
+		else if (Selected)
+		{
+			borderColor = SelectedBorderColor;
+			bgColor = SelectedBackgroundColor;
+		}
+		else if (IsMouseHovering)
+		{
+			if (Main.mouseLeft)
+			{
+				borderColor = ClickBorderColor;
+				bgColor = ClickBackgroundColor;
+			}
+			else
+			{
+				borderColor = HoverBorderColor;
+				bgColor = HoverBackgroundColor;
+			}
+		}
+		else
+		{
+			borderColor = BorderColor;
+			bgColor = BackgroundColor;
+		}
 
 		if (backgroundTexture != null)
 			DrawPanel(spriteBatch, backgroundTexture.Value, bgColor);
 
-        CalculatedStyle dims = GetInnerDimensions();
-        Vector2 pos = (new Vector2(dims.Width, dims.Height) - textSize) * TextAlign + dims.Position();
+		CalculatedStyle dims = GetInnerDimensions();
+		Vector2 pos = (new Vector2(dims.Width, dims.Height) - textSize) * TextAlign + dims.Position();
 
-        ChatManager.DrawColorCodedStringShadow(spriteBatch, FontAssets.MouseText.Value, text, pos, Color.Black, 0f, Vector2.Zero, Vector2.One);
-        ChatManager.DrawColorCodedString(spriteBatch, FontAssets.MouseText.Value, text, pos, 0f, Vector2.Zero, Vector2.One, out _);
+		ChatManager.DrawColorCodedStringShadow(spriteBatch, FontAssets.MouseText.Value, text, pos, Color.Black, 0f, Vector2.Zero, Vector2.One);
+		ChatManager.DrawColorCodedString(spriteBatch, FontAssets.MouseText.Value, text, pos, 0f, Vector2.Zero, Vector2.One, out _);
 
 		if (borderTexture != null)
 			DrawPanel(spriteBatch, borderTexture.Value, borderColor);
+
+		if (IsMouseHovering && HoverText is not null)
+			Main.instance.MouseTextNoOverride(HoverText);
 	}
 
-    public override void MouseOver(UIMouseEvent evt)
+	public override void MouseOver(UIMouseEvent evt)
+	{
+		base.MouseOver(evt);
+
+		if (!Disabled && !Selected)
+			SoundEngine.PlaySound(SoundID.MenuTick);
+	}
+
+    public override void LeftClick(UIMouseEvent evt)
     {
-        base.MouseOver(evt);
-        SoundEngine.PlaySound(SoundID.MenuTick);
+        base.LeftClick(evt);
+		if (!Disabled && Selection is not null)
+			Selection.CurrentSelection = this;
+
+		if (!Disabled)
+			OnClick?.Invoke(this);
     }
 }

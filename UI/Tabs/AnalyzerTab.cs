@@ -1,6 +1,8 @@
 using System;
 using Microsoft.Xna.Framework;
 using Terraria;
+using Terraria.Audio;
+using Terraria.ID;
 using Terraria.UI;
 
 namespace SpawnAnalyzer.UI.Tabs;
@@ -11,6 +13,7 @@ public class AnalyzerTab : Tab
 
     UIButton analyzeHereButton;
     UIButton clearAnalysisButton;
+    UIButton reAnalyzeButton;
 
     public AnalyzerTab()
     {
@@ -23,27 +26,43 @@ public class AnalyzerTab : Tab
 
         analyzeHereButton = new("Analyze here")
         {
-            Left = new(-75, 0.5f),
+            Left = new(-115, 0.5f),
             Height = new(40, 0),
-            Width = new(150, 0),
+            Width = new(230, 0),
         };
         analyzeHereButton.OnLeftClick += (_, _) =>
         {
+            SoundEngine.PlaySound(SoundID.MenuTick);
             SpawnAnalyzer.BeginAnalyze(Main.player[Main.myPlayer]);
             UpdateCenterElement();
         };
 
         clearAnalysisButton = new("Clear")
         {
-            Left = new(-50, 0.5f),
+            Left = new(-110 - 5, 0.5f),
             Top = new(50, 0),
             Height = new(30, 0),
-            Width = new(100, 0),
+            Width = new(110, 0),
         };
         clearAnalysisButton.OnLeftClick += (_, _) =>
         {
+            SoundEngine.PlaySound(SoundID.MenuTick);
             SpawnAnalyzer.ClearAnalysis();
             UpdateCenterElement();
+        };
+
+        reAnalyzeButton = new("Re-analyze")
+        {
+            Left = new(5, 0.5f),
+            Top = new(50, 0),
+            Height = new(30, 0),
+            Width = new(110, 0),
+        };
+        reAnalyzeButton.OnLeftClick += (_, _) =>
+        {
+            SoundEngine.PlaySound(SoundID.MenuTick);
+            SpawnAnalyzer.LastAnalysis?.Simulate();
+            SpawnAnalyzerUI.SendEvent(new NewPosSelectedEvent(SpawnAnalyzerUI.SelectedPos));
         };
 
         grabDragElements.Add(centerElement);
@@ -66,8 +85,10 @@ public class AnalyzerTab : Tab
             height += 10;
 
             centerElement.Append(clearAnalysisButton);
-            height += clearAnalysisButton.Height.Pixels;
-            width = Math.Max(width, clearAnalysisButton.Width.Pixels);
+            centerElement.Append(reAnalyzeButton);
+
+            height += Math.Max(clearAnalysisButton.Height.Pixels, reAnalyzeButton.Height.Pixels);
+            width = Math.Max(width, clearAnalysisButton.Width.Pixels + 10 + reAnalyzeButton.Width.Pixels);
         }
 
         centerElement.Width.Pixels = width;

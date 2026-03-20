@@ -26,7 +26,7 @@ public class SpawnAnalysis
 
     public readonly Dictionary<Point, SpawnAnalysisSpot> foundSpawnSpots = new();
 
-    public readonly Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> results = new();
+    public readonly SpawnAnalysisResults results = new();
 
     public readonly NPC.Spawner globalSpawner = new();
 
@@ -92,17 +92,11 @@ public class SpawnAnalysis
         Stopwatch sw = Stopwatch.StartNew();
         foreach (SpawnAnalysisSpot spot in foundSpawnSpots.Values)
         {
-            spot.Simulate(out var at);
+            spot.Simulate(out var at, results);
             totalAnalysisTime += at;
         }
 
-        foreach (var posDict in results.Values)
-        {
-            foreach (var mspawn in posDict.Values)
-            {
-                mspawn.spawns.Sort((a, b) => Math.Sign(b.chance - a.chance));
-            }
-        }
+        results.SortByChance();
 
         sw.Stop();
         Console.WriteLine($"Simulated {foundSpawnSpots.Count} spawn spots in {sw.Elapsed.TotalMilliseconds:0.00}ms (with {totalAnalysisTime.TotalMilliseconds:0.00}ms spent analyzing)");
@@ -138,7 +132,7 @@ public class SpawnAnalysis
 
         HashSet<Point> drawnSpots = new();
 
-        IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.Keys);
+        IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.final.Keys);
 
         Point mouseWorldPos = Main.MouseWorld.ToPoint();
         mouseWorldPos.X /= 16;
@@ -160,7 +154,7 @@ public class SpawnAnalysis
             );
 
             bool spawnSpot = foundSpawnSpots.ContainsKey(pos);
-            bool spawnResult = results.ContainsKey(pos);
+            bool spawnResult = results.final.ContainsKey(pos);
 
             Color color;
 
@@ -234,7 +228,15 @@ public class SpawnAnalysis
             spawnSpot.MouseOver(mouseOverText);
         }
 
-        if (results.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var posDict))
+        if (results.starting.TryGetValue((Main.MouseWorld / 16).ToPoint(), out var posDict))
+        {
+            if (posDict.Count == 1)
+                mouseOverText.AppendLine("1 mob begins spawning here");
+            else
+                mouseOverText.AppendLine($"{posDict.Count} unique mobs begin their spawns here");
+        }
+
+        if (results.final.TryGetValue((Main.MouseWorld / 16).ToPoint(), out posDict))
         {
             if (posDict.Count == 1)
                 mouseOverText.AppendLine("1 mob spawns here");
@@ -247,6 +249,46 @@ public class SpawnAnalysis
             string str = mouseOverText.ToString();
             Main.instance.MouseTextHackZoom(str, 0);
             Main.mouseText = true;
+        }
+    }
+}
+
+public class SpawnAnalysisResults
+{
+    /// <summary>
+    /// Spawns at final points where they spawned
+    /// </summary>
+    public Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> final = new();
+
+    /// <summary>
+    /// Spawns at points where they began
+    /// </summary>
+    public Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> starting = new();
+
+    /// <summary>
+    /// All final spawns
+    /// </summary>
+    public Dictionary<int, AnalyzedMultiSpawn> total = new();
+
+    public void Clear()
+    {
+        final.Clear();
+        starting.Clear();
+        total.Clear();
+    }
+
+    public IEnumerable<AnalyzedMultiSpawn> AllMultiSpawns()
+    {
+        return final.Values.SelectMany(v => v.Values)
+            .Concat(starting.Values.SelectMany(v => v.Values))
+            .Concat(total.Values);
+    }
+
+    public void SortByChance()
+    {
+        foreach (var mspawn in AllMultiSpawns())
+        {
+            mspawn.spawns.Sort((a, b) => Math.Sign(b.chance - a.chance));
         }
     }
 }

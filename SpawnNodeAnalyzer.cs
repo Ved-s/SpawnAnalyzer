@@ -202,7 +202,7 @@ public class AnalyzedMultiPosSpawn
                 continue;
             }
 
-            thisSpawns.MergeFrom(kvp.Value);
+            thisSpawns.MergeFrom(kvp.Value, false);
         }
     }
 
@@ -228,7 +228,7 @@ public class AnalyzedMultiPosSpawn
                 continue;
             }
 
-            thisSpawns.MergeFrom(kvp.Value);
+            thisSpawns.MergeFrom(kvp.Value, false);
         }
     }
 }
@@ -248,13 +248,19 @@ public class AnalyzedMultiSpawn
         spawns.AddRange(spawn.spawns);
     }
 
-    public void MergeFrom(AnalyzedMultiSpawn spawn)
+    public void MergeFrom(AnalyzedMultiSpawn spawn, bool keepOriginal)
     {
 
         for (int i = 0; i < spawn.spawns.Count; i++)
         {
             if (spawns.Count <= i)
-                spawns.Add(spawn.spawns[i]);
+            {
+                AnalyzedSpawn s = spawn.spawns[i];
+                if (keepOriginal)
+                    s = s.Clone();
+
+                spawns.Add(s);
+            }
             else
                 spawns[i].MergeFrom(spawn.spawns[i]);
         }
@@ -273,10 +279,18 @@ public class AnalyzedSpawn
 
     public Point TileWorldPos => new(pixelWorldPos.X / 16, pixelWorldPos.Y / 16);
 
+    /// <summary>
+    /// doesn't modify `spawn`
+    /// </summary>
     public void MergeFrom(AnalyzedSpawn spawn)
     {
         chance += spawn.chance;
         leaked |= spawn.leaked;
         affectedByLuck |= spawn.affectedByLuck;
+    }
+
+    public AnalyzedSpawn Clone()
+    {
+        return (AnalyzedSpawn)MemberwiseClone();
     }
 }

@@ -53,7 +53,7 @@ public class SpawnAnalysisSpot
         simulationContext = new(impl.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
     }
 
-    internal void Simulate(out TimeSpan analysisTime)
+    internal void Simulate(out TimeSpan analysisTime, SpawnAnalysisResults outResults)
     {
         SimulationResult? results = simulationContext.Simulate();
         analysisTime = default;
@@ -63,25 +63,44 @@ public class SpawnAnalysisSpot
         Stopwatch sw = Stopwatch.StartNew();
         AnalyzedSpawns spawnresults = SpawnNodeAnalyzer.Analyze(results.Value);
 
+        Dictionary<int, AnalyzedMultiSpawn> startSpawns = new();
+        outResults.starting[position] = startSpawns;
+
         foreach (var mspawn in spawnresults.spawns.Values)
         {
             mspawn.ConvertToTilePos();
+
+            if (!startSpawns.TryGetValue(mspawn.id, out var startSpawnsId))
+            {
+                startSpawnsId = new(mspawn.id);
+                startSpawns.Add(mspawn.id, startSpawnsId);
+            }
+
+            if (!outResults.total.TryGetValue(mspawn.id, out var totalSpawnsId))
+            {
+                totalSpawnsId = new(mspawn.id);
+                outResults.total.Add(mspawn.id, totalSpawnsId);
+            }
+
             foreach (var posSpawn in mspawn.spawns)
             {
-                if (!analysis.results.TryGetValue(posSpawn.Key, out var posDict))
+                if (!outResults.final.TryGetValue(posSpawn.Key, out var finslSpawnsPos))
                 {
-                    posDict = new();
-                    analysis.results.Add(posSpawn.Key, posDict);
+                    finslSpawnsPos = new();
+                    outResults.final.Add(posSpawn.Key, finslSpawnsPos);
                 }
 
-                if (!posDict.TryGetValue(mspawn.id, out var spawnres))
+                if (!finslSpawnsPos.TryGetValue(mspawn.id, out var finalSpawnsId))
                 {
-                    spawnres = new(mspawn.id);
-                    posDict.Add(mspawn.id, spawnres);
+                    finalSpawnsId = new(mspawn.id);
+                    finslSpawnsPos.Add(mspawn.id, finalSpawnsId);
                 }
 
-                spawnres.MergeFrom(posSpawn.Value);
+                finalSpawnsId.MergeFrom(posSpawn.Value, true);
+                startSpawnsId.MergeFrom(posSpawn.Value, true);
+                totalSpawnsId.MergeFrom(posSpawn.Value, false);
             }
+
         }
         sw.Stop();
         analysisTime = sw.Elapsed;

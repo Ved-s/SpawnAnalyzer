@@ -53,7 +53,7 @@ namespace SpawnAnalyzer;
 
 public class SpawnAnalyzer
 {
-    public static SpawnAnalysis? LastAnalysis;
+    public static SpawnAnalysis? LastAnalysis {get; private set; }
 
     public static SimulatorImpl? DefaultImpl;
     private static Thread? ImplInitThread;
@@ -66,6 +66,8 @@ public class SpawnAnalyzer
     internal static Hook? NPCNewNPCHook;
 
     static Dictionary<string, Texture2D> TextureCache = new();
+
+    static int DebugCountdown = -1;
 
     public static void InstallVanilla()
     {
@@ -90,6 +92,9 @@ public class SpawnAnalyzer
         });
         ImplInitThread.Name = "SpawnAnalyzer DefaultImpl generator";
         ImplInitThread.Start();
+
+        if (Program.LaunchParameters.ContainsKey("-spawnanalyzerdebug"))
+            DebugCountdown = 10;
     }
 
     public static SimulatorImpl? GetDefaultImplBlocking()
@@ -423,11 +428,13 @@ public class SpawnAnalyzer
             return;
 
         LastAnalysis = new(player, impl);
+        SpawnAnalyzerUI.SendEvent(new NewSpawnAnalysisEvent(LastAnalysis));
     }
 
     public static void ClearAnalysis()
     {
         LastAnalysis = null;
+        SpawnAnalyzerUI.SendEvent(new NewSpawnAnalysisEvent(null));
     }
 
     delegate void orig_Main_Update(Main self, GameTime time);
@@ -435,16 +442,15 @@ public class SpawnAnalyzer
     {
         orig(self, time);
 
-        if (Main.keyState.IsKeyDown(Keys.Z) && !Main.oldKeyState.IsKeyDown(Keys.Z))
+        if (!Main.gameMenu)
         {
-            if (Main.keyState.PressingShift())
-            {
-                LastAnalysis?.Simulate();
-            }
-            else
+            if (DebugCountdown == 0)
             {
                 BeginAnalyze(Main.player[Main.myPlayer]);
+                SpawnAnalyzerUI.Open();
             }
+            if (DebugCountdown >= 0)
+                DebugCountdown--;
         }
     }
 

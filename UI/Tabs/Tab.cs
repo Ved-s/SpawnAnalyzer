@@ -1,12 +1,14 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Terraria.UI;
 
 namespace SpawnAnalyzer.UI.Tabs;
 
-public abstract class Tab: UIElement
+public abstract class Tab : UIElement
 {
     Point? lastPos = null;
+    SpawnAnalysis? lastAnalysis = null;
 
     public HashSet<UIElement> grabDragElements = new();
 
@@ -17,16 +19,31 @@ public abstract class Tab: UIElement
 
     public virtual void TabSelected(SpawnAnalyzerUI ui)
     {
+        if (!ReferenceEquals(lastAnalysis, SpawnAnalyzer.LastAnalysis))
+        {
+            lastAnalysis = SpawnAnalyzer.LastAnalysis;
+            OnEvent(new NewSpawnAnalysisEvent(lastAnalysis));
+        }
+
         Point? newPos = SpawnAnalyzerUI.SelectedPos;
         if (newPos != lastPos)
         {
             lastPos = newPos;
-            NewPosSelected(newPos);
+            OnEvent(new NewPosSelectedEvent(newPos));
         }
     }
 
-    public virtual void NewPosSelected(Point? pos)
+    public virtual void OnEvent(SpawnAnalyzerUIEvent ev)
     {
-        lastPos = pos;
+        switch (ev)
+        {
+            case NewPosSelectedEvent np:
+                lastPos = np.Position;
+                break;
+
+            case NewSpawnAnalysisEvent na:
+                lastAnalysis = na.Analysis;
+                break;
+        }
     }
 }

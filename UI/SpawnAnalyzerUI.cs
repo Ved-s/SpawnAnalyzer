@@ -32,6 +32,8 @@ public class SpawnAnalyzerUI : UIState
     static Point? lastSelectedPos;
     static Point? selectedPos;
 
+    static SpawnAnalysis? lastAnalysis;
+
     static bool uiToggleButtonHovered;
 
     static public Point? SelectedPos
@@ -43,7 +45,7 @@ public class SpawnAnalyzerUI : UIState
             if (Visible && lastSelectedPos != selectedPos)
             {
                 lastSelectedPos = selectedPos;
-                instance!.NewPosSelected(selectedPos);
+                SendEvent(new NewPosSelectedEvent(selectedPos));
             }
         }
     }
@@ -177,7 +179,7 @@ public class SpawnAnalyzerUI : UIState
 
         tabs.Add(new(tabSelection, "Final spawns")
         {
-            Tag = new FinalSpawnsTab(),
+            Tag = new SpawnsTab(),
 
             Width = new(140, 0),
             Height = new(32, 0),
@@ -205,7 +207,13 @@ public class SpawnAnalyzerUI : UIState
             if (lastSelectedPos != selectedPos)
             {
                 lastSelectedPos = selectedPos;
-                instance.NewPosSelected(selectedPos);
+                SendEvent(new NewPosSelectedEvent(selectedPos));
+            }
+
+            if (!ReferenceEquals(lastAnalysis, SpawnAnalyzer.LastAnalysis))
+            {
+                lastAnalysis = SpawnAnalyzer.LastAnalysis;
+                SendEvent(new NewSpawnAnalysisEvent(lastAnalysis));
             }
 
             SoundEngine.PlaySound(SoundID.MenuOpen);
@@ -255,7 +263,8 @@ public class SpawnAnalyzerUI : UIState
 
         instance = new();
 
-        instance.NewPosSelected(SelectedPos);
+        SendEvent(new NewSpawnAnalysisEvent(SpawnAnalyzer.LastAnalysis));
+        SendEvent(new NewPosSelectedEvent(selectedPos));
 
         instance.Top = top;
         instance.Left = left;
@@ -517,8 +526,16 @@ public class SpawnAnalyzerUI : UIState
         UpdateMinSize();
     }
 
-    void NewPosSelected(Point? pos)
-    {
-        currentTab?.NewPosSelected(pos);
+    public static void SendEvent(SpawnAnalyzerUIEvent ev) {
+
+        if (!Visible)
+            return;
+
+        if (ev is NewSpawnAnalysisEvent na)
+        {
+            lastAnalysis = na.Analysis;
+        }
+
+        instance?.currentTab?.OnEvent(ev);
     }
 }
