@@ -15,7 +15,7 @@ namespace SpawnAnalyzer.Rewriters;
 
 class SetSpawnFlagsForChosenTileRewriter
 {
-    public static SpawnAnalyzer.SetSpawnFlagsForChosenTile GenerateMethod()
+    public static SimulatorImpl.SetSpawnFlagsForChosenTile GenerateMethod()
     {
         DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("SetSpawnFlagsForChosenTile",
             [
@@ -33,7 +33,7 @@ class SetSpawnFlagsForChosenTileRewriter
 
         MethodInfo method = dmd.Generate();
 
-        return method.CreateDelegate<SpawnAnalyzer.SetSpawnFlagsForChosenTile>();
+        return method.CreateDelegate<SimulatorImpl.SetSpawnFlagsForChosenTile>();
     }
 
     static void RewriteMethod(ILContext il)
@@ -1146,7 +1146,7 @@ class SetSpawnFlagsForChosenTileRewriter
         c.GotoLabel(secondConditionEnd);
 
         c.Index -= secondBodyLength + 1;
-        Debug.Assert(c.Next.Operand == secondConditionEnd);
+        Debug.Assert((c.Next.Operand as ILLabel)?.Target == secondConditionEnd.Target);
         c.Index += 1;
 
         c.Emit(OpCodes.Ldc_I4_1);

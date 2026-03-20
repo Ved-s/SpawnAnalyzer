@@ -23,6 +23,8 @@ public class SpawnAnalyzerUI : UIState
 
     static SpawnAnalyzerUI? instance;
 
+    public static SpawnAnalyzerUI? Instance { get => instance; }
+
     public static bool Visible => ui.CurrentState is not null;
 
     static Vector2 MouseScreenRelative => Main.MouseScreen / Main.ScreenSize.ToVector2();
@@ -86,6 +88,16 @@ public class SpawnAnalyzerUI : UIState
 
     const float TabSpacing = 4;
 
+    const float CloseButtonWidth = 70;
+
+#if DEBUG
+    const float ReloadButtonWidth = 90;
+    const float ReloadButtonPad = 4;
+#else
+    const float ReloadButtonWidth = 0;
+    const float ReloadButtonPad = 0;
+#endif
+
     public SpawnAnalyzerUI()
     {
         Top = new(0f, .35f);
@@ -95,27 +107,39 @@ public class SpawnAnalyzerUI : UIState
 
         tabsUi = new()
         {
-            Width = new(-(70 + 10 + 12), 1),
+            Width = new(-(12 + 10 + ReloadButtonWidth + ReloadButtonPad + CloseButtonWidth), 1),
             Height = new(32, 0),
             Left = new(12, 0),
         };
 
         tabSelection.OnSelectionChanged += (t) =>
         {
-            SelectTab(t?.Tag as Tab);  
+            SelectTab(t?.Tag as Tab);
         };
 
         UIButton closeButton = new("Close")
         {
-            Width = new(70, 0),
+            Width = new(CloseButtonWidth, 0),
             Height = new(28, 0),
             Top = new(2, 0),
-            Left = new(-70, 1),
+            Left = new(-CloseButtonWidth, 1),
         };
         closeButton.OnLeftClick += (_, _) => Close();
 
         Append(tabsUi);
         Append(closeButton);
+
+#if DEBUG
+        UIButton reloadButton = new("Reload")
+        {
+            Width = new(ReloadButtonWidth, 0),
+            Height = new(28, 0),
+            Top = new(2, 0),
+            Left = new(-(ReloadButtonWidth + ReloadButtonPad + CloseButtonWidth), 1),
+        };
+        reloadButton.OnLeftClick += (_, _) => Reload();
+        Append(reloadButton);
+#endif
 
         mainPanel = new()
         {
@@ -143,18 +167,17 @@ public class SpawnAnalyzerUI : UIState
 
         Append(mainPanel);
 
-
-        tabs.Add(new(tabSelection, "Final spawns")
+        tabs.Add(new(tabSelection, "Analyzer")
         {
-            Tag = new FinalSpawnsTab(),
+            Tag = new AnalyzerTab(),
 
             Width = new(140, 0),
             Height = new(32, 0),
         });
 
-        tabs.Add(new(tabSelection, "Analyzer")
+        tabs.Add(new(tabSelection, "Final spawns")
         {
-            Tag = new AnalyzerTab(),
+            Tag = new FinalSpawnsTab(),
 
             Width = new(140, 0),
             Height = new(32, 0),
@@ -210,6 +233,44 @@ public class SpawnAnalyzerUI : UIState
         else
             Open();
     }
+
+#if DEBUG
+    public static void Reload()
+    {
+        if (instance is null)
+            return;
+
+        SoundEngine.PlaySound(SoundID.MenuTick);
+
+        int selectedTab = -1;
+        if (instance.tabSelection.CurrentSelection is {} tab)
+        {
+            selectedTab = instance.tabs.FindIndex(t => ReferenceEquals(t, tab));
+        }
+
+        StyleDimension top = instance.Top;
+        StyleDimension left = instance.Left;
+        StyleDimension width = instance.Width;
+        StyleDimension height = instance.Height;
+
+        instance = new();
+
+        instance.NewPosSelected(SelectedPos);
+
+        instance.Top = top;
+        instance.Left = left;
+        instance.Width = width;
+        instance.Height = height;
+
+        if (selectedTab >= 0 && instance.tabs.Count > selectedTab)
+        {
+            instance.tabSelection.CurrentSelection = instance.tabs[selectedTab];
+        }
+
+        ui.SetState(instance);
+        instance.Recalculate();
+    }
+#endif
 
     public static void DrawLayer(SpriteBatch sb)
     {
@@ -287,7 +348,7 @@ public class SpawnAnalyzerUI : UIState
                 bool noContainerChildrenHover = true;
                 foreach (UIElement child in container.Children)
                 {
-                    if (child.IsMouseHovering)
+                    if (child.IsMouseHovering && child is not UIText)
                     {
                         noContainerChildrenHover = false;
                         break;
@@ -391,7 +452,7 @@ public class SpawnAnalyzerUI : UIState
             UIElement tab = tabs[i];
             tabsWidth += tab.Width.Pixels;
         }
-        
+
         Vector2 thisMin = new(12 + tabsWidth + 10 + 70, 200);
         if (currentTab is not null)
         {
@@ -402,7 +463,7 @@ public class SpawnAnalyzerUI : UIState
         return thisMin;
     }
 
-    void UpdateMinSize()
+    public void UpdateMinSize()
     {
         // TODO: do better
 
@@ -423,7 +484,7 @@ public class SpawnAnalyzerUI : UIState
         }
         float width = Math.Max(0, x - TabSpacing);
 
-        x = -(width/2);
+        x = -(width / 2);
         foreach (UIElement tab in tabs)
         {
             tab.Left = new(x, 0.5f);

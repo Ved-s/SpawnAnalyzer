@@ -46,7 +46,7 @@ public class FinalSpawnsTab: Tab
 
         reAnalyzeButton = new("Re-analyze")
         {
-            Width = new(ReCalculateButtonWidth, 0),
+            Width = new(ReCalculateButtonWidth, 0), 
             Height = new(28, 0),
             Top = new(4, 0),
             Left = new(-(ReCalculateButtonWidth + 4), 1),
@@ -107,7 +107,6 @@ public class FinalSpawnsTab: Tab
         spawnButtonSelection = new();
         spawnButtonSelection.OnSelectionChanged += OnSpawnButtonSelected;
 
-        grabDragElements.Add(headerText);
         grabDragElements.Add(pageContainer);
         grabDragElements.Add(spawnButtonsContainer);
         grabDragElements.Add(spawnButtonsContainerScroll);

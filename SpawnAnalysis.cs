@@ -34,11 +34,13 @@ public class SpawnAnalysis
 
     public readonly int spawnRate;
     public readonly int maxSpawns;
-
     Point? lastHoveredSpot;
+    private readonly SimulatorImpl impl;
 
-    public SpawnAnalysis(Player player)
+    public SpawnAnalysis(Player player, SimulatorImpl impl)
     {
+        this.impl = impl;
+
         Stopwatch sw = Stopwatch.StartNew();
         NPC.Spawner.GetSpawnArea(player, out spawnArea, out safeArea);
 
@@ -46,7 +48,7 @@ public class SpawnAnalysis
 
         globalSpawnerChances = SpawnerChances.WithValuesFrom(globalSpawner);
 
-        SpawnAnalyzer.GetSpawnRateImpl(globalSpawner, player, out spawnRate, out maxSpawns, globalSpawnerChances);
+        impl.GetSpawnRateImpl(globalSpawner, player, out spawnRate, out maxSpawns, globalSpawnerChances);
 
         // Seems like GetSpawnTileParams only outputs one type of spawn params per tile, pick the first
         // and show warnings on multiple different
@@ -59,11 +61,11 @@ public class SpawnAnalysis
             {
                 int xRef = x;
                 int yRef = y;
-                if (SpawnAnalyzer.GetSpawnTileParamsImpl(globalSpawner, player, ref xRef, ref yRef, spawnArea, safeArea, out SpawnParamsStage1 spawnParams))
+                if (impl.GetSpawnTileParamsImpl(globalSpawner, player, ref xRef, ref yRef, spawnArea, safeArea, out SpawnParamsStage1 spawnParams))
                 {
                     if (!foundSpawnSpots.TryGetValue(new(xRef, yRef), out SpawnAnalysisSpot? spot))
                     {
-                        foundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(this, new(xRef, yRef), spawnParams));
+                        foundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(this, new(xRef, yRef), spawnParams, impl));
                         continue;
                     }
                     spot.hits++;

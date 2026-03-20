@@ -4,15 +4,20 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
+using System.Security;
+using System.Security.Permissions;
+using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
+using MonoMod.Logs;
 using MonoMod.RuntimeDetour;
-using SpawnAnalyzer.Rewriters;
+using MonoMod.Utils;
 using SpawnAnalyzer.Rewriters.SpawnANnNPC;
 using SpawnAnalyzer.Simulation;
 using SpawnAnalyzer.UI;
@@ -50,17 +55,8 @@ public class SpawnAnalyzer
 {
     public static SpawnAnalysis? LastAnalysis;
 
-    internal delegate bool GetSpawnTileParams(NPC.Spawner spawner, Player player, ref int x, ref int y, Rectangle spawnArea, Rectangle safeArea, out SpawnParamsStage1 spawnParams);
-    internal static readonly GetSpawnTileParams GetSpawnTileParamsImpl = GetSpawnTileParamsRewriter.GenerateMethod();
-
-    internal delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, SpawnerChances spawnParams);
-    internal static readonly SetSpawnFlagsForChosenTile SetSpawnFlagsForChosenTileImpl = SetSpawnFlagsForChosenTileRewriter.GenerateMethod();
-
-    internal delegate void GetSpawnRate(NPC.Spawner spawner, Player player, out int spawnRate, out int maxSpawns, SpawnerChances spawnParams);
-    internal static readonly GetSpawnRate GetSpawnRateImpl = GetSpawnRateRewriter.GenerateMethod();
-
-    // TODO: offload to a different thread
-    internal static readonly SpawnAnNPCRewriteData SpawnAnNpcRewrite = SpawnAnNPCRewriter.RewriteMethod(null);
+    public static SimulatorImpl? DefaultImpl;
+    private static Thread? ImplInitThread;
 
     internal static Hook? MainUpdateHook;
     internal static Hook? MainUpdateUIStatesHook;
@@ -85,6 +81,27 @@ public class SpawnAnalyzer
         ]), On_NPC_Spawner_SpawnNPC);
 
         NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
+
+        ImplInitThread = new Thread(() =>
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            DefaultImpl = SimulatorImpl.GenerateImpl();
+            Console.WriteLine($"\x1b[1m\x1b[32mDone\x1b[39m SimulatorImpl.GenerateImpl in {sw.Elapsed.TotalMilliseconds:0.00}ms\x1b[0m");
+        });
+        ImplInitThread.Name = "SpawnAnalyzer DefaultImpl generator";
+        ImplInitThread.Start();
+    }
+
+    public static SimulatorImpl? GetDefaultImplBlocking()
+    {
+        if (DefaultImpl is not null)
+            return DefaultImpl;
+
+        if (ImplInitThread is null)
+            return null;
+
+        ImplInitThread.Join();
+        return DefaultImpl;
     }
 
     public static Texture2D GetTexture(string path)
@@ -362,7 +379,7 @@ public class SpawnAnalyzer
 
                             firstSpawn = false;
 
-                            Console.Write($"{spawn.chance*100:0.0}%");
+                            Console.Write($"{spawn.chance * 100:0.0}%");
 
                             if (spawn.affectedByLuck)
                                 Console.Write(" (luck)");
@@ -399,9 +416,18 @@ public class SpawnAnalyzer
 
     delegate void SpawnAnNPC(int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target);
 
-    static void BeginAnalyze(Player player)
+    public static void BeginAnalyze(Player player)
     {
-        LastAnalysis = new(player);
+        var impl = GetDefaultImplBlocking();
+        if (impl is null)
+            return;
+
+        LastAnalysis = new(player, impl);
+    }
+
+    public static void ClearAnalysis()
+    {
+        LastAnalysis = null;
     }
 
     delegate void orig_Main_Update(Main self, GameTime time);

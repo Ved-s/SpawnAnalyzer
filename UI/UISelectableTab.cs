@@ -44,6 +44,8 @@ public class UISelectableTab : UITab, ISelectable
         : base(text)
     {
         this.selection = selection;
+        BackgroundColor = DeselectedBackgroundColor;
+        BorderColor = DeselectedBorderColor;
     }
 
     public override void MouseOver(UIMouseEvent evt)

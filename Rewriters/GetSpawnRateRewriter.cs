@@ -11,7 +11,7 @@ namespace SpawnAnalyzer.Rewriters;
 
 public class GetSpawnRateRewriter
 {
-    internal static SpawnAnalyzer.GetSpawnRate GenerateMethod()
+    internal static SimulatorImpl.GetSpawnRate GenerateMethod()
     {
         DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("GetSpawnRate",
             [
@@ -30,7 +30,7 @@ public class GetSpawnRateRewriter
         DMDHack.SetNullOriginalMethod(dmd);
 
         MethodInfo method = dmd.Generate();
-        return method.CreateDelegate<SpawnAnalyzer.GetSpawnRate>();
+        return method.CreateDelegate<SimulatorImpl.GetSpawnRate>();
     }
 
     static void RewriteMethod(ILContext il)

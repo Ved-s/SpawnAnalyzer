@@ -28,7 +28,7 @@ public class SpawnAnalysisSpot
 
     readonly SpawnSimulationContext simulationContext;
 
-    public SpawnAnalysisSpot(SpawnAnalysis analysis, Point position, SpawnParamsStage1 p)
+    public SpawnAnalysisSpot(SpawnAnalysis analysis, Point position, SpawnParamsStage1 p, SimulatorImpl impl)
     {
         this.analysis = analysis;
         this.position = position;
@@ -46,11 +46,11 @@ public class SpawnAnalysisSpot
         SpawnerChances localChances = SpawnerChances.WithValuesFrom(localSpawner);
         SpawnerChances.CopyGlobalFields(analysis.globalSpawnerChances, localChances);
 
-        SpawnAnalyzer.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, localChances);
+        impl.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, localChances);
 
         chances = localChances;
 
-        simulationContext = new(SpawnAnalyzer.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
+        simulationContext = new(impl.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
     }
 
     internal void Simulate(out TimeSpan analysisTime)

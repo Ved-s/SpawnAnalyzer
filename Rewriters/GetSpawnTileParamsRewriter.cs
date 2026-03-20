@@ -16,7 +16,7 @@ namespace SpawnAnalyzer.Rewriters;
 
 static class GetSpawnTileParamsRewriter
 {
-    public static SpawnAnalyzer.GetSpawnTileParams GenerateMethod()
+    public static SimulatorImpl.GetSpawnTileParams GenerateMethod()
     {
         DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("FindSpawnTile",
             [
@@ -37,7 +37,7 @@ static class GetSpawnTileParamsRewriter
 
         MethodInfo method = dmd.Generate();
 
-        return method.CreateDelegate<SpawnAnalyzer.GetSpawnTileParams>();
+        return method.CreateDelegate<SimulatorImpl.GetSpawnTileParams>();
     }
 
     static void RewriteMethod(ILContext il)
