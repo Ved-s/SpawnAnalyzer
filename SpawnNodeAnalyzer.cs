@@ -15,10 +15,13 @@ class AnalyzerStackFrame
     public int currentBranch = -1;
     public int nextBranch = 0;
 
+    public int node;
+
     public List<(AnalyzedSpawns, float)> branches = new();
 
-    public AnalyzerStackFrame(SimulationNodeTimeline timeline, NodeConnection? incomingConnection)
+    public AnalyzerStackFrame(int node, SimulationNodeTimeline timeline, NodeConnection? incomingConnection)
     {
+        this.node = node;
         this.timeline = timeline;
         this.incomingConnection = incomingConnection;
     }
@@ -30,13 +33,20 @@ public static class SpawnNodeAnalyzer
     {
         Stack<AnalyzerStackFrame> stack = new();
 
-        stack.Push(new(simres.nodes[simres.startNode]!.timelines[0], null));
+        stack.Push(new(simres.startNode, simres.nodes[simres.startNode]!.timelines[0], null));
 
         AnalyzedSpawns? retvalue = null;
 
         while (stack.Count > 0)
         {
             AnalyzerStackFrame frame = stack.Peek();
+
+            if (stack.Count > simres.nodes.Count * 2) {
+                Console.WriteLine("Stack overflow while analyzing");
+                retvalue = new();
+                stack.Pop();
+                continue;
+            }
 
             NodeConnection branch;
 
@@ -78,7 +88,7 @@ public static class SpawnNodeAnalyzer
                     {
                         SimulationNodeTimeline timeline = simres.nodes[branch.nextNode.node]!.timelines[branch.nextNode.timeline];
 
-                        stack.Push(new(timeline, branch));
+                        stack.Push(new(branch.nextNode.node, timeline, branch));
                         break;
                     }
                     else

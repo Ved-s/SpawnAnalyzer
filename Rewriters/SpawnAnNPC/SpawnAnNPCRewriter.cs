@@ -75,7 +75,7 @@ public class SpawnAnNPCRewriter
         StateType ls = null!;
 
         int nodeSwitchIndex = 0;
-        
+
         bool possiblyNonDeterministic = false;
 
         il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex, out possiblyNonDeterministic));
@@ -90,6 +90,12 @@ public class SpawnAnNPCRewriter
 
         if (printoutAfter)
         {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var node = nodes[i];
+                Console.WriteLine($"nodes[{i}] = {node.node.GetType().Name} at IL_{node.Offset:x4}");
+            }
+
             StackAnalysis? stack = null;
             Exception? stackException = null;
             try
@@ -101,14 +107,12 @@ public class SpawnAnNPCRewriter
                 stackException = e;
             }
 
-
             il.FancyPrintout(stack?.instructions);
 
             if (stackException is not null)
             {
                 Console.WriteLine($"Stack analysis exception: {stackException}");
             }
-
         }
 
         DMDHack.SetNullOriginalMethod(dmd);
@@ -138,12 +142,13 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
-        ILCursor c = new(il);
+        ReplaceGetZombieSetings(il);
 
         InlineCalls(il);
         il.Instrs.FillWithFakeILOffsets();
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
+
 
         ILLabel mainEntryLabel = il.DefineLabel();
         List<ILLabel> entryJumps = [];
@@ -173,6 +178,8 @@ public class SpawnAnNPCRewriter
             allowFields, allowMethods,
             stack
         );
+
+        ILCursor c = new(il);
 
         nodeRewriter.RewriteNodes(c, allowUnknownPatterns);
 
@@ -504,6 +511,279 @@ public class SpawnAnNPCRewriter
         ];
 
         CallInliner.InlineAllCalls(il, m => inlineMethodsPass2.Any(m.Is));
+    }
+
+    static void ReplaceGetZombieSetings(ILContext il)
+    {
+        ILCursor c = new(il);
+
+        /*
+            IL_004C: ldarg.0
+            IL_004D: ldloca.s  zombieStyle
+            IL_004F: ldloca.s  spawnArmedZombies
+            IL_0051: ldloca.s  torchZombieChance
+            IL_0053: ldloca.s  maggotZombieChance
+            IL_0055: call      instance void Terraria.NPC/Spawner::GetZombieSettings(int32&, bool&, int32&, int32&)
+        */
+
+        int zombieStyle = 0;
+        int spawnArmedZombies = 0;
+        int torchZombieChance = 0;
+        int maggotZombieChance = 0;
+
+        if (!c.TryGotoNext(
+            x => x.MatchLdarg(0),
+            x => x.MatchLdloca(out zombieStyle),
+            x => x.MatchLdloca(out spawnArmedZombies),
+            x => x.MatchLdloca(out torchZombieChance),
+            x => x.MatchLdloca(out maggotZombieChance),
+            x => x.MatchCall<NPC.Spawner>("GetZombieSettings")
+        ))
+        {
+            Console.WriteLine("Warning! ReplaceGetZombieSetings fail in matching callsite");
+            return;
+        }
+
+        Instruction callStart = c.Next!;
+
+        int zombieStyleRefLoads = 0;
+        int zombieStyleLoads = 0;
+        foreach (Instruction instr in il.Instrs)
+        {
+            if (instr.MatchLdloc(zombieStyle))
+            {
+                zombieStyleLoads++;
+            }
+            else if (instr.MatchLdloca(zombieStyle))
+            {
+                zombieStyleRefLoads++;
+            }
+        }
+
+        if (zombieStyleRefLoads != 1 || zombieStyleLoads != 3)
+        {
+            Console.WriteLine("Warning! ReplaceGetZombieSetings fail, unexpected usage of zombieStyle");
+            return;
+        }
+
+        DynamicMethodDefinition methodDmd = new(Utils.GetMethodOrThrow<NPC.Spawner>("GetZombieSettings"));
+
+        ILContext dctx = new(methodDmd.Definition);
+        ILCursor dc = new(dctx);
+
+        // cut this out from GetZombieSettings and paste into main method at specific location
+        /*
+            zombieStyle = Main.rand.Next(7);
+            if (WorldGen.Skyblock.lowTiles && !NPC.DownedAnyPreHardmodeBoss && zombieStyle != 4 && zombieStyle != 5 && Main.rand.Next(3) == 0)
+            {
+                zombieStyle = ((Main.rand.Next(3) == 0) ? 4 : 5);
+            }
+
+            IL_000F: -ldarg.1
+            IL_0010:  ldsfld    class Terraria.Utilities.UnifiedRandom Terraria.Main::rand
+            IL_0015:  ldc.i4.7
+            IL_0016:  callvirt  instance int32 Terraria.Utilities.UnifiedRandom::Next(int32)
+            IL_001B: -stind.i4
+                     +starg.1
+
+            IL_001C:  ldsfld    bool Terraria.WorldGen/Skyblock::lowTiles
+            IL_0021: -brfalse.s IL_0054
+                     +brfalse   end
+
+            IL_0023:  call      bool Terraria.NPC::get_DownedAnyPreHardmodeBoss()
+            IL_0028: -brtrue.s  IL_0054
+                     +brtrue   end
+
+            IL_002A:  ldarg.1
+            IL_002B: -ldind.i4
+            IL_002C:  ldc.i4.4
+            IL_002D: -beq.s     IL_0054
+                     +beq.s     end
+
+            IL_002F:  ldarg.1
+            IL_0030: -ldind.i4
+            IL_0031:  ldc.i4.5
+            IL_0032: -beq.s     IL_0054
+                     +beq.s     end
+
+            IL_0034:  ldsfld    class Terraria.Utilities.UnifiedRandom Terraria.Main::rand
+            IL_0039:  ldc.i4.3
+            IL_003A:  callvirt  instance int32 Terraria.Utilities.UnifiedRandom::Next(int32)
+            IL_003F: -brtrue.s  IL_0054
+                     +brtrue   end
+
+            IL_0041: -ldarg.1
+            IL_0042:  ldsfld    class Terraria.Utilities.UnifiedRandom Terraria.Main::rand
+            IL_0047:  ldc.i4.3
+            IL_0048:  callvirt  instance int32 Terraria.Utilities.UnifiedRandom::Next(int32)
+            IL_004D:  brfalse.s IL_0052
+
+            IL_004F:  ldc.i4.5
+            IL_0050:  br.s      IL_0053
+
+            IL_0052:  ldc.i4.4
+
+            IL_0053: -stind.i4
+                     +starg.1
+
+                end:
+        */
+
+        Instruction oldEnd = null!;
+
+        Func<Instruction, bool>[] matchers = [
+            /* 0  */ x=>x.MatchLdarg(1),
+            /* 1  */ x=>x.MatchLdsfld<Main>("rand"),
+            /* 2  */ x=>x.MatchLdcI4(out _),
+            /* 3  */ x=>x.MatchCallvirt<UnifiedRandom>("Next"),
+            /* 4  */ x=>x.MatchStindI4(),
+
+            /* 5  */ x=>x.MatchLdsfld(typeof(WorldGen.Skyblock), "lowTiles"),
+            /* 6  */ x=>{
+                bool b = x.OpCode == OpCodes.Brfalse | x.OpCode == OpCodes.Brfalse_S;
+                if (b) oldEnd = (Instruction)x.Operand;
+                return b;
+            },
+
+            /* 7  */ x=>x.MatchCall<NPC>("get_DownedAnyPreHardmodeBoss"),
+            /* 8  */ x=>x.OpCode == OpCodes.Brtrue | x.OpCode == OpCodes.Brtrue_S,
+
+            /* 9  */ x=>x.MatchLdarg(1),
+            /* 10 */ x=>x.MatchLdindI4(),
+            /* 11 */ x=>x.MatchLdcI4(out _),
+            /* 12 */ x=>x.OpCode == OpCodes.Beq | x.OpCode == OpCodes.Beq_S,
+
+            /* 13 */ x=>x.MatchLdarg(1),
+            /* 14 */ x=>x.MatchLdindI4(),
+            /* 15 */ x=>x.MatchLdcI4(out _),
+            /* 16 */ x=>x.OpCode == OpCodes.Beq | x.OpCode == OpCodes.Beq_S,
+
+            /* 17 */ x=>x.MatchLdsfld<Main>("rand"),
+            /* 18 */ x=>x.MatchLdcI4(out _),
+            /* 19 */ x=>x.MatchCallvirt<UnifiedRandom>("Next"),
+            /* 20 */ x=>x.OpCode == OpCodes.Brtrue | x.OpCode == OpCodes.Brtrue_S,
+
+            /* 21 */ x=>x.MatchLdarg(1),
+            /* 22 */ x=>x.MatchLdsfld<Main>("rand"),
+            /* 23 */ x=>x.MatchLdcI4(out _),
+            /* 24 */ x=>x.MatchCallvirt<UnifiedRandom>("Next"),
+            /* 25 */ x=>x.OpCode == OpCodes.Brfalse | x.OpCode == OpCodes.Brfalse_S,
+
+            /* 26 */ x=>x.MatchLdcI4(out _),
+            /* 27 */ x=>x.OpCode == OpCodes.Br | x.OpCode == OpCodes.Br_S,
+
+            /* 28 */ x=>x.MatchLdcI4(out _),
+
+            /* 29 */ x=>x.MatchStindI4(),
+        ];
+
+        if (!dc.TryGotoNext(matchers))
+        {
+            Console.WriteLine("Warning! ReplaceGetZombieSetings fail in matching random bit");
+            return;
+        }
+
+        List<Instruction> instructions = new(matchers.Length);
+
+        int start = dc.Index;
+        for (int i = start; i < start + matchers.Length; i++)
+        {
+            int index = i - start;
+            if (index == 0 || index == 10 || index == 14 || index == 21)
+                continue;
+
+            Instruction instr = dc.Instrs[i];
+
+            if (index == 4 || index == 29)
+            {
+                instr.OpCode = OpCodes.Starg;
+                instr.Operand = dctx.Method.Parameters[1];
+            }
+
+            instructions.Add(instr);
+        }
+
+        dc.RemoveRange(matchers.Length);
+
+        // search for the place to inject into
+        /*
+            <inject here>
+
+            end:
+
+            IL_B766: ldloc.2   spawnArmedZombies
+            IL_B767: brfalse   IL_B81A
+
+            IL_B76C: ldloc.1   zombieStyle
+            IL_B76D: ldc.i4.1
+            IL_B76E: beq       IL_B81A
+
+            IL_B773: call      bool Terraria.Main::get_expertMode()
+            IL_B778: brfalse   IL_B81A
+        */
+
+        if (!c.TryGotoNext(
+            MoveType.AfterLabel,
+            x => x.MatchLdloc(spawnArmedZombies),
+            x => x.MatchBrfalse(out _),
+
+            x => x.MatchLdloc(zombieStyle),
+            x => x.MatchLdcI4(out _),
+            x => x.MatchBeq(out _),
+
+            x => x.MatchCall<Main>("get_expertMode"),
+            x => x.MatchBrfalse(out _)
+        ))
+        {
+            Console.WriteLine("Warning! ReplaceGetZombieSetings fail in matching injection spot");
+            return;
+        }
+
+        Instruction newEnd = c.Next!;
+
+        c.Emit(OpCodes.Nop);
+        Instruction nop = c.Prev;
+
+        foreach (Instruction instr in instructions)
+        {
+            if (instr.Operand == oldEnd)
+            {
+                instr.Operand = newEnd;
+            }
+        }
+
+        CallInliner.InlineMethodBody(il, c.Index, [], instructions, [new InlineParameter.Null(), new InlineParameter.Local(zombieStyle)], allowStarg: true);
+
+        c.Goto(nop, MoveType.AfterLabel);
+        c.Remove();
+
+        c.Goto(callStart);
+
+        /*
+         -> IL_004C: ldarg.0
+            IL_004D: ldloca.s  zombieStyle
+            IL_004F: ldloca.s  spawnArmedZombies
+            IL_0051: ldloca.s  torchZombieChance
+            IL_0053: ldloca.s  maggotZombieChance
+            IL_0055: call      instance void Terraria.NPC/Spawner::GetZombieSettings(int32&, bool&, int32&, int32&)
+        */
+
+        InlineParameter[] methodParams = [
+            new InlineParameter.Argument(0),
+            new InlineParameter.LocalRef(zombieStyle),
+            new InlineParameter.LocalRef(spawnArmedZombies),
+            new InlineParameter.LocalRef(torchZombieChance),
+            new InlineParameter.LocalRef(maggotZombieChance),
+        ];
+
+        CallInliner.InlineMethodDefinition(il, c.Index + 6, methodDmd.Definition, methodParams);
+
+        c.RemoveRange(6);
+
+        // il.Instrs.FillWithFakeILOffsets();
+        // il.FancyPrintout();
+
+        // Environment.Exit(1);
     }
 }
 

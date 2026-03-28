@@ -129,7 +129,7 @@ public static class CallInliner
                 }
             }
 
-            i += InlineCall(il, i+1, resolved, inlineParams, newLocals);
+            i += InlineCall(il, i + 1, resolved, inlineParams, newLocals);
 
             il.RetargetLabels(instr, instr.Next);
             instructions.Remove(instr);
@@ -141,6 +141,24 @@ public static class CallInliner
     /// </summary>
     public static int InlineCall(ILContext il, int start, MethodInfo method, InlineParameter[] inlineParams, List<VariableDefinition>? freeLocals = null)
     {
+        return InlineMethodDefinition(il, start, new DynamicMethodDefinition(method).Definition, inlineParams, freeLocals);
+    }
+
+    /// <summary>
+    /// Inline the method into current ILContext starting at start offset
+    /// </summary>
+    public static int InlineMethodDefinition(ILContext il, int start, MethodDefinition method, InlineParameter[] inlineParams, List<VariableDefinition>? freeLocals = null)
+    {
+        List<Instruction> newInstructions = method.Body.Instructions.ToList();
+        method.Body.Instructions.Clear();
+        return InlineMethodBody(il, start, method.Body.Variables, newInstructions, inlineParams, freeLocals);
+    }
+
+    /// <summary>
+    /// Inline the method into current ILContext starting at start offset
+    /// </summary>
+    public static int InlineMethodBody(ILContext il, int start, IEnumerable<VariableDefinition> locals, IEnumerable<Instruction> body, InlineParameter[] inlineParams, List<VariableDefinition>? freeLocals = null, bool allowStarg = false)
+    {
         List<VariableDefinition> newLocalsPicker = new();
 
         List<VariableDefinition> localsRemap = new();
@@ -149,12 +167,10 @@ public static class CallInliner
         ILLabel returnLabel = il.DefineLabel();
         returnLabel.Target = il.Instrs[start];
 
-        DynamicMethodDefinition dmd = new(method);
-
         if (freeLocals is not null)
             newLocalsPicker.AddRange(freeLocals);
 
-        foreach (VariableDefinition local in dmd.Definition.Body.Variables)
+        foreach (VariableDefinition local in locals)
         {
             int existingLocal = newLocalsPicker.FindIndex(l => l.VariableType.FullName == local.VariableType.FullName);
 
@@ -163,8 +179,7 @@ public static class CallInliner
             if (existingLocal < 0)
             {
                 pickedLocal = new(local.VariableType);
-                if (freeLocals is not null)
-                    freeLocals.Add(pickedLocal);
+                freeLocals?.Add(pickedLocal);
                 il.Body.Variables.Add(pickedLocal);
             }
             else
@@ -176,37 +191,44 @@ public static class CallInliner
             localsRemap.Add(pickedLocal);
         }
 
-        List<Instruction> newInstructions = dmd.Definition.Body.Instructions.ToList();
-        dmd.Definition.Body.Instructions.Clear();
-
         instructionLabelMap.Clear();
 
-        foreach (Instruction newInstr in newInstructions)
+        foreach (Instruction newInstr in body)
         {
+            ILLabel ProcessInstruction(Instruction instr)
+            {
+                if (!instructionLabelMap.TryGetValue(instr, out ILLabel? label))
+                {
+                    label = il.DefineLabel();
+                    label.Target = instr;
+                    instructionLabelMap[instr] = label;
+                }
+                return label;
+            }
             switch (newInstr.Operand)
             {
                 case Instruction instr:
-                    if (!instructionLabelMap.TryGetValue(instr, out ILLabel? label))
-                    {
-                        label = il.DefineLabel();
-                        label.Target = instr;
-                        instructionLabelMap[instr] = label;
-                    }
-                    newInstr.Operand = label;
+                    newInstr.Operand = ProcessInstruction(instr);
                     break;
 
                 case Instruction[] instrs:
                     ILLabel[] labels = new ILLabel[instrs.Length];
                     for (int j = 0; j < instrs.Length; j++)
                     {
-                        Instruction instr = instrs[j];
-                        if (!instructionLabelMap.TryGetValue(instr, out label))
-                        {
-                            label = il.DefineLabel();
-                            label.Target = instr;
-                            instructionLabelMap[instr] = label;
-                        }
-                        labels[j] = label;
+                        labels[j] = ProcessInstruction(instrs[j]);
+                    }
+                    newInstr.Operand = labels;
+                    break;
+
+                case ILLabel l:
+                    newInstr.Operand = ProcessInstruction(l.Target!);
+                    break;
+
+                case ILLabel[] ls:
+                    labels = new ILLabel[ls.Length];
+                    for (int j = 0; j < ls.Length; j++)
+                    {
+                        labels[j] = ProcessInstruction(ls[j].Target!);
                     }
                     newInstr.Operand = labels;
                     break;
@@ -217,7 +239,7 @@ public static class CallInliner
 
         int i = start;
 
-        foreach (Instruction newInstr in newInstructions)
+        foreach (Instruction newInstr in body)
         {
             if (newInstr.OpCode == OpCodes.Ret)
             {
@@ -239,9 +261,31 @@ public static class CallInliner
                 newInstr.OpCode = OpCodes.Stloc;
                 newInstr.Operand = localsRemap[index];
             }
-            else if (newInstr.MatchStarg(out _))
+            else if (newInstr.MatchStarg(out index))
             {
-                throw new InvalidOperationException("Unsupported starg in inlining function");
+                if (allowStarg)
+                {
+                    InlineParameter param = inlineParams[index];
+                    switch (param)
+                    {
+                        case InlineParameter.Argument arg:
+                            newInstr.OpCode = OpCodes.Starg;
+                            newInstr.Operand = il.Method.Parameters[arg.Index];
+                            break;
+
+                        case InlineParameter.Local loc:
+                            newInstr.OpCode = OpCodes.Stloc;
+                            newInstr.Operand = il.Body.Variables[loc.Index];
+                            break;
+
+                        default:
+                            throw new InvalidOperationException($"Invalid InlineParameter.{param.GetType().Name} for starg");
+                    }
+                }
+                else
+                {
+                    throw new InvalidOperationException("Unsupported starg in inlining function");
+                }
             }
             else if (newInstr.MatchLdarga(out _))
             {

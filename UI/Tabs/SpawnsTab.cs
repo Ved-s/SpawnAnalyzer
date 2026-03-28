@@ -406,6 +406,16 @@ public class SpawnsTab : Tab
 
         float y = 90;
 
+        sidePanel.Append(new UIText($"Type: {mspawn.id}")
+        {
+            Top = new(y, 0),
+            Width = new(0, 1),
+            Height = new(30, 0),
+            TextOriginX = 0,
+        });
+
+        y += 22;
+
         for (int i = 0; i < mspawn.spawns.Count; i++)
         {
             AnalyzedSpawn spawn = mspawn.spawns[i];
@@ -513,7 +523,8 @@ public class SpawnsTab : Tab
                 y += 20;
             }
 
-            if (spawn.leaked) {
+            if (spawn.leaked)
+            {
                 sidePanel.Append(new UIText("Could not determine")
                 {
                     Top = new(y, 0),
