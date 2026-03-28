@@ -75,10 +75,7 @@ public class SpawnAnNPCRewriter
         StateType ls = null!;
 
         int nodeSwitchIndex = 0;
-        InlineCalls(il);
-
-        dmd.Definition.RecalculateILOffsets();
-
+        
         bool possiblyNonDeterministic = false;
 
         il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex, out possiblyNonDeterministic));
@@ -142,6 +139,9 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
         ILCursor c = new(il);
+
+        InlineCalls(il);
+        il.Instrs.FillWithFakeILOffsets();
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
 
@@ -491,20 +491,19 @@ public class SpawnAnNPCRewriter
 
             return resolved.GetCustomAttribute<TestMethods.TestInlineAttribute>() is not null;
         }
-
         MethodBase[] inlineMethodsPass1 = [
             Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn"),
             Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnSpider"),
             // Utils.GetMethodOrThrow<NPC>("FindCattailTop"),
         ];
 
-        CallInliner.InlineCalls(il, m => inlineMethodsPass1.Any(m.Is) || IsATestInlineMethod(m));
+        CallInliner.InlineAllCalls(il, m => inlineMethodsPass1.Any(m.Is) || IsATestInlineMethod(m));
 
         MethodBase[] inlineMethodsPass2 = [
             Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn_ChanceToBeHolidaySlime"),
         ];
 
-        CallInliner.InlineCalls(il, m => inlineMethodsPass2.Any(m.Is));
+        CallInliner.InlineAllCalls(il, m => inlineMethodsPass2.Any(m.Is));
     }
 }
 

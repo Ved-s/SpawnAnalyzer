@@ -142,4 +142,11 @@ static class MonoModExtenstions
         Console.Write(DnSpyAnsiColors.reset);
 
     }
+
+    public static void FillWithFakeILOffsets(this Mono.Collections.Generic.Collection<Instruction> collection) {
+        for (int i = 0; i < collection.Count; i++)
+        {
+            collection[i].Offset = i;
+        }
+    }
 }

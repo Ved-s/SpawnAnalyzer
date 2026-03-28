@@ -12,22 +12,21 @@ namespace SpawnAnalyzer;
 
 public static class CallInliner
 {
-    public static void InlineCalls(ILContext il, Func<MethodReference, bool> matcher)
+    public static void InlineAllCalls(ILContext il, Func<MethodReference, bool> matcher)
     {
         StackAnalysis stack = StackAnalyzer.Analyze(il);
-        List<VariableDefinition> newLocals = new();
-        List<VariableDefinition> newLocalsPicker = new();
-
-        List<VariableDefinition> localsRemap = new();
 
         var instructions = il.Body.Instructions;
+
+        List<VariableDefinition> newLocals = new();
+
         for (int i = 0; i < instructions.Count; i++)
         {
             Instruction instr = instructions[i];
             if (instr.OpCode != OpCodes.Call)
                 continue;
 
-            MethodReference method = instr.Operand as MethodReference 
+            MethodReference method = instr.Operand as MethodReference
                 ?? throw new InvalidProgramException("call with a non-method operand");
 
             if (!matcher(method))
@@ -113,9 +112,9 @@ public static class CallInliner
 
                     if (removeSource)
                     {
-                        // todo: retarget instead
-                        producer.OpCode = OpCodes.Nop;
-                        producer.Operand = null;
+                        il.RetargetLabels(producer, producer.Next);
+                        instructions.Remove(producer);
+                        i--;
                     }
                 }
 
@@ -130,137 +129,188 @@ public static class CallInliner
                 }
             }
 
-            // todo: retarget instead
-            instr.OpCode = OpCodes.Nop;
-            instr.Operand = null;
+            i += InlineCall(il, i+1, resolved, inlineParams, newLocals);
 
-            i++;
+            il.RetargetLabels(instr, instr.Next);
+            instructions.Remove(instr);
+        }
+    }
 
-            Instruction returnLabel = instr.Next;
+    /// <summary>
+    /// Inline the method into current ILContext starting at start offset
+    /// </summary>
+    public static int InlineCall(ILContext il, int start, MethodInfo method, InlineParameter[] inlineParams, List<VariableDefinition>? freeLocals = null)
+    {
+        List<VariableDefinition> newLocalsPicker = new();
 
-            DynamicMethodDefinition dmd = new(resolved);
+        List<VariableDefinition> localsRemap = new();
+        Dictionary<Instruction, ILLabel> instructionLabelMap = new();
 
-            localsRemap.Clear();
+        ILLabel returnLabel = il.DefineLabel();
+        returnLabel.Target = il.Instrs[start];
 
-            newLocalsPicker.Clear();
-            newLocalsPicker.AddRange(newLocals);
+        DynamicMethodDefinition dmd = new(method);
 
-            foreach (VariableDefinition local in dmd.Definition.Body.Variables)
+        if (freeLocals is not null)
+            newLocalsPicker.AddRange(freeLocals);
+
+        foreach (VariableDefinition local in dmd.Definition.Body.Variables)
+        {
+            int existingLocal = newLocalsPicker.FindIndex(l => l.VariableType.FullName == local.VariableType.FullName);
+
+            VariableDefinition pickedLocal;
+
+            if (existingLocal < 0)
             {
-                int existingLocal = newLocalsPicker.FindIndex(l => l.VariableType.FullName == local.VariableType.FullName);
-
-                VariableDefinition pickedLocal;
-
-                if (existingLocal < 0)
-                {
-                    pickedLocal = new(local.VariableType);
-                    newLocals.Add(pickedLocal);
-                    il.Body.Variables.Add(pickedLocal);
-                }
-                else
-                {
-                    pickedLocal = newLocalsPicker[existingLocal];
-                    newLocalsPicker.RemoveAt(existingLocal);
-                }
-
-                localsRemap.Add(pickedLocal);
+                pickedLocal = new(local.VariableType);
+                if (freeLocals is not null)
+                    freeLocals.Add(pickedLocal);
+                il.Body.Variables.Add(pickedLocal);
+            }
+            else
+            {
+                pickedLocal = newLocalsPicker[existingLocal];
+                newLocalsPicker.RemoveAt(existingLocal);
             }
 
-            List<Instruction> newInstructions = dmd.Definition.Body.Instructions.ToList();
-            dmd.Definition.Body.Instructions.Clear();
+            localsRemap.Add(pickedLocal);
+        }
 
-            foreach (Instruction newInstr in newInstructions)
+        List<Instruction> newInstructions = dmd.Definition.Body.Instructions.ToList();
+        dmd.Definition.Body.Instructions.Clear();
+
+        instructionLabelMap.Clear();
+
+        foreach (Instruction newInstr in newInstructions)
+        {
+            switch (newInstr.Operand)
             {
-                if (newInstr.OpCode == OpCodes.Ret)
-                {
-                    newInstr.OpCode = OpCodes.Br;
-                    newInstr.Operand = returnLabel;
-                }
-                else if (newInstr.MatchLdloc(out int index))
-                {
-                    newInstr.OpCode = OpCodes.Ldloc;
-                    newInstr.Operand = localsRemap[index];
-                }
-                else if (newInstr.MatchLdloca(out index))
-                {
-                    newInstr.OpCode = OpCodes.Ldloca;
-                    newInstr.Operand = localsRemap[index];
-                }
-                else if (newInstr.MatchStloc(out index))
-                {
-                    newInstr.OpCode = OpCodes.Stloc;
-                    newInstr.Operand = localsRemap[index];
-                }
-                else if (newInstr.MatchStarg(out _))
-                {
-                    throw new InvalidOperationException("Unsupported starg in inlining function");
-                }
-                else if (newInstr.MatchLdarga(out _))
-                {
-                    throw new InvalidOperationException("Unsupported ldarga in inlining function");
-                }
-                else if (newInstr.MatchLdarg(out index))
-                {
-                    InlineParameter param = inlineParams[index];
-                    switch (param) {
-                        case InlineParameter.Null:
-                            newInstr.OpCode = OpCodes.Ldnull;
-                            newInstr.Operand = null;
-                            break;
-
-                        case InlineParameter.ConstInt ci:
-                            newInstr.OpCode = OpCodes.Ldc_I4;
-                            newInstr.Operand = ci.Int;
-                            break;
-
-                        case InlineParameter.ConstLong cl:
-                            newInstr.OpCode = OpCodes.Ldc_I8;
-                            newInstr.Operand = cl.Long;
-                            break;
-
-                        case InlineParameter.ConstFloat cf:
-                            newInstr.OpCode = OpCodes.Ldc_R4;
-                            newInstr.Operand = cf.Float;
-                            break;
-
-                        case InlineParameter.ConstDouble cd:
-                            newInstr.OpCode = OpCodes.Ldc_R8;
-                            newInstr.Operand = cd.Double;
-                            break;
-
-                        case InlineParameter.Argument arg:
-                            newInstr.OpCode = OpCodes.Ldarg;
-                            newInstr.Operand = il.Method.Parameters[arg.Index];
-                            break;
-
-                        case InlineParameter.ArgumentRef argref:
-                            newInstr.OpCode = OpCodes.Ldarga;
-                            newInstr.Operand = il.Method.Parameters[argref.Index];
-                            break;
-
-                        case InlineParameter.Local loc:
-                            newInstr.OpCode = OpCodes.Ldloc;
-                            newInstr.Operand = il.Body.Variables[loc.Index];
-                            break;
-
-                        case InlineParameter.LocalRef locref:
-                            newInstr.OpCode = OpCodes.Ldloca;
-                            newInstr.Operand = il.Body.Variables[locref.Index];
-                            break;
-
-                        default:
-                            throw new NotImplementedException($"Unhandled InlineParameter.{param.GetType().Name}");
+                case Instruction instr:
+                    if (!instructionLabelMap.TryGetValue(instr, out ILLabel? label))
+                    {
+                        label = il.DefineLabel();
+                        label.Target = instr;
+                        instructionLabelMap[instr] = label;
                     }
-                }
+                    newInstr.Operand = label;
+                    break;
 
-                instructions.Insert(i, newInstr);
-                i++;
+                case Instruction[] instrs:
+                    ILLabel[] labels = new ILLabel[instrs.Length];
+                    for (int j = 0; j < instrs.Length; j++)
+                    {
+                        Instruction instr = instrs[j];
+                        if (!instructionLabelMap.TryGetValue(instr, out label))
+                        {
+                            label = il.DefineLabel();
+                            label.Target = instr;
+                            instructionLabelMap[instr] = label;
+                        }
+                        labels[j] = label;
+                    }
+                    newInstr.Operand = labels;
+                    break;
             }
         }
+
+        var instructions = il.Instrs;
+
+        int i = start;
+
+        foreach (Instruction newInstr in newInstructions)
+        {
+            if (newInstr.OpCode == OpCodes.Ret)
+            {
+                newInstr.OpCode = OpCodes.Br;
+                newInstr.Operand = returnLabel;
+            }
+            else if (newInstr.MatchLdloc(out int index))
+            {
+                newInstr.OpCode = OpCodes.Ldloc;
+                newInstr.Operand = localsRemap[index];
+            }
+            else if (newInstr.MatchLdloca(out index))
+            {
+                newInstr.OpCode = OpCodes.Ldloca;
+                newInstr.Operand = localsRemap[index];
+            }
+            else if (newInstr.MatchStloc(out index))
+            {
+                newInstr.OpCode = OpCodes.Stloc;
+                newInstr.Operand = localsRemap[index];
+            }
+            else if (newInstr.MatchStarg(out _))
+            {
+                throw new InvalidOperationException("Unsupported starg in inlining function");
+            }
+            else if (newInstr.MatchLdarga(out _))
+            {
+                throw new InvalidOperationException("Unsupported ldarga in inlining function");
+            }
+            else if (newInstr.MatchLdarg(out index))
+            {
+                InlineParameter param = inlineParams[index];
+                switch (param)
+                {
+                    case InlineParameter.Null:
+                        newInstr.OpCode = OpCodes.Ldnull;
+                        newInstr.Operand = null;
+                        break;
+
+                    case InlineParameter.ConstInt ci:
+                        newInstr.OpCode = OpCodes.Ldc_I4;
+                        newInstr.Operand = ci.Int;
+                        break;
+
+                    case InlineParameter.ConstLong cl:
+                        newInstr.OpCode = OpCodes.Ldc_I8;
+                        newInstr.Operand = cl.Long;
+                        break;
+
+                    case InlineParameter.ConstFloat cf:
+                        newInstr.OpCode = OpCodes.Ldc_R4;
+                        newInstr.Operand = cf.Float;
+                        break;
+
+                    case InlineParameter.ConstDouble cd:
+                        newInstr.OpCode = OpCodes.Ldc_R8;
+                        newInstr.Operand = cd.Double;
+                        break;
+
+                    case InlineParameter.Argument arg:
+                        newInstr.OpCode = OpCodes.Ldarg;
+                        newInstr.Operand = il.Method.Parameters[arg.Index];
+                        break;
+
+                    case InlineParameter.ArgumentRef argref:
+                        newInstr.OpCode = OpCodes.Ldarga;
+                        newInstr.Operand = il.Method.Parameters[argref.Index];
+                        break;
+
+                    case InlineParameter.Local loc:
+                        newInstr.OpCode = OpCodes.Ldloc;
+                        newInstr.Operand = il.Body.Variables[loc.Index];
+                        break;
+
+                    case InlineParameter.LocalRef locref:
+                        newInstr.OpCode = OpCodes.Ldloca;
+                        newInstr.Operand = il.Body.Variables[locref.Index];
+                        break;
+
+                    default:
+                        throw new NotImplementedException($"Unhandled InlineParameter.{param.GetType().Name}");
+                }
+            }
+
+            instructions.Insert(i, newInstr);
+            i++;
+        }
+
+        return i - start;
     }
 }
 
-record class InlineParameter
+public record class InlineParameter
 {
     public record class Null() : InlineParameter;
     public record class ConstInt(int Int) : InlineParameter;
