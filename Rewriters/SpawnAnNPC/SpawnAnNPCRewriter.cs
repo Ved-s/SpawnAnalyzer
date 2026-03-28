@@ -36,9 +36,7 @@ public class SpawnAnNPCRewriter
         OpCodes.Stelem_Ref,
     ];
 
-    static readonly OpCode[] OutsideWritingOpcodes = [
-        OpCodes.Stfld,
-        OpCodes.Stsfld,
+    static readonly OpCode[] StindOpcodes = [
         OpCodes.Stind_I,
         OpCodes.Stind_I1,
         OpCodes.Stind_I2,
@@ -47,11 +45,17 @@ public class SpawnAnNPCRewriter
         OpCodes.Stind_R4,
         OpCodes.Stind_R8,
         OpCodes.Stind_Ref,
+    ];
+
+    static readonly OpCode[] OutsideWritingOpcodes = [
+        OpCodes.Stfld,
+        OpCodes.Stsfld,
         OpCodes.Stobj,
         OpCodes.Call,
         OpCodes.Calli,
         OpCodes.Callvirt,
 
+        ..StindOpcodes,
         ..StelemOpcodes
     ];
     public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true, bool printoutAfter = false)
@@ -142,7 +146,9 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
-        ReplaceGetZombieSetings(il);
+        List<Instruction> safeInstructions = new();
+
+        ReplaceGetZombieSetings(il, safeInstructions);
 
         InlineCalls(il);
         il.Instrs.FillWithFakeILOffsets();
@@ -194,7 +200,7 @@ public class SpawnAnNPCRewriter
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
         RewriteOldArgAccessors(c, contextParam);
-        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
+        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, safeInstructions, stack, false);
 
         localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 
@@ -371,7 +377,7 @@ public class SpawnAnNPCRewriter
         }
     }
 
-    static bool VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, StackAnalysis? stack, bool nested)
+    static bool VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, IEnumerable<Instruction> allowInstructions, StackAnalysis? stack, bool nested)
     {
         int sideEffects = 0;
 
@@ -381,6 +387,9 @@ public class SpawnAnNPCRewriter
             x => OutsideWritingOpcodes.Contains(x.OpCode)
         ))
         {
+            if (allowInstructions.Contains(c.Next!)) {
+                continue;
+            }
             if (c.Next!.Operand is MethodReference method)
             {
                 MethodBase resolved = method.ResolveReflection();
@@ -415,7 +424,7 @@ public class SpawnAnNPCRewriter
                 DynamicMethodDefinition dmd = new(resolved);
                 ILContext ilc = new(dmd.Definition);
 
-                if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, null, true))
+                if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, [], null, true))
                 {
                     continue;
                 }
@@ -513,7 +522,7 @@ public class SpawnAnNPCRewriter
         CallInliner.InlineAllCalls(il, m => inlineMethodsPass2.Any(m.Is));
     }
 
-    static void ReplaceGetZombieSetings(ILContext il)
+    static void ReplaceGetZombieSetings(ILContext il, List<Instruction> safeInstructions)
     {
         ILCursor c = new(il);
 
@@ -705,6 +714,15 @@ public class SpawnAnNPCRewriter
 
         dc.RemoveRange(matchers.Length);
 
+        // verify no random calls remain in the method
+        dc.Index = 0;
+        if (dc.TryGotoNext(
+            x => x.MatchLdsfld<Main>("rand")
+        )) {
+            Console.WriteLine("Warning! ReplaceGetZombieSetings fail, there's more unknown randomness in GetZombieSetings");
+            return;
+        }
+
         // search for the place to inject into
         /*
             <inject here>
@@ -737,6 +755,12 @@ public class SpawnAnNPCRewriter
         {
             Console.WriteLine("Warning! ReplaceGetZombieSetings fail in matching injection spot");
             return;
+        }
+
+        foreach (Instruction instr in dc.Instrs) {
+            if (StindOpcodes.Contains(instr.OpCode)) {
+                safeInstructions.Add(instr);
+            }
         }
 
         Instruction newEnd = c.Next!;
