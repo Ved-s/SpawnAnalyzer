@@ -77,11 +77,15 @@ public class NPCSpawnButton : UIElement, ISelectable
 
         float chance = 0;
         bool affectedByLuck = false;
+        bool leaked = false;
 
         foreach (var spawn in spawn.spawns)
         {
             if (spawn.chance > chance)
+            {
                 chance = spawn.chance;
+                leaked = spawn.leaked;
+            }
 
             if (spawn.affectedByLuck)
                 affectedByLuck = true;
@@ -95,15 +99,27 @@ public class NPCSpawnButton : UIElement, ISelectable
             double avgSeconds = avgTicks / 60;
 
             chanceText = FormatTimeShort(avgSeconds);
+
+            if (leaked) {
+                chanceText = ">" + chanceText;
+            }
         }
         else
         {
             chanceText = FormatPercentage(chance);
+
+            if (leaked && !chanceText.StartsWith("<")) {
+                chanceText = "<" + chanceText;
+            }
         }
 
         Vector2 chanceTextPos = dims.BottomRight() - new Vector2(5, -7) - FontAssets.MouseText.Value.MeasureString(chanceText);
+        Color color = leaked switch {
+            true => Color.Red,
+            false => Color.White,
+        };
 
-        ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, chanceText, chanceTextPos, Color.White, 0f, Vector2.One, Vector2.One);
+        ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, chanceText, chanceTextPos, color, 0f, Vector2.One, Vector2.One);
 
         if (spawn.spawns.Count > 1)
         {

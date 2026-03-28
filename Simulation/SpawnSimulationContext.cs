@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using Terraria;
-using SpawnAnalyzer.Rewriters.SpawnANnNPC;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using Terraria.ID;
 using Terraria.GameContent.Bestiary;
 
@@ -33,6 +33,8 @@ public class SpawnSimulationContext
     static SpawnSimulationContext? currentlySimulatingContext;
 
     public static SpawnSimulationContext? CurrentlySimulatingContext { get => currentlySimulatingContext; }
+
+    public bool NonDeterministic = false;
 
     public SpawnSimulationContext(
         SpawnAnNPCRewriteData runData,
@@ -208,6 +210,7 @@ public class SpawnSimulationContext
     public SimulationResult? Simulate()
     {
         foundInitialNode = null;
+        NonDeterministic = false;
         localState = Activator.CreateInstance(runData.LocalStateType.Type);
         currentTimeline = 0;
         currentlySimulatingContext = this;

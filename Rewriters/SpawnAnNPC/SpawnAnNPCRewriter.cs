@@ -19,12 +19,12 @@ using Terraria.Utilities;
 using OpCode = Mono.Cecil.Cil.OpCode;
 using OpCodes = Mono.Cecil.Cil.OpCodes;
 
-namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
+namespace SpawnAnalyzer.Rewriters.SpawnAnNPC;
 
 public class SpawnAnNPCRewriter
 {
 
-    static OpCode[] StelemOpcodes = [
+    static readonly OpCode[] StelemOpcodes = [
         OpCodes.Stelem_Any,
         OpCodes.Stelem_I,
         OpCodes.Stelem_I1,
@@ -36,7 +36,7 @@ public class SpawnAnNPCRewriter
         OpCodes.Stelem_Ref,
     ];
 
-    static OpCode[] OutsideWritingOpcodes = [
+    static readonly OpCode[] OutsideWritingOpcodes = [
         OpCodes.Stfld,
         OpCodes.Stsfld,
         OpCodes.Stind_I,
@@ -79,7 +79,9 @@ public class SpawnAnNPCRewriter
 
         dmd.Definition.RecalculateILOffsets();
 
-        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex));
+        bool possiblyNonDeterministic = false;
+
+        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex, out possiblyNonDeterministic));
 
         if (il.Instrs[nodeSwitchIndex].Operand is Instruction[] nodeInstrs)
         {
@@ -118,10 +120,17 @@ public class SpawnAnNPCRewriter
 
         var dg = newMethod.CreateDelegate<RewrittenSpawnAnNPC>();
 
-        return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls);
+        return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls, possiblyNonDeterministic);
     }
 
-    static void RewriteMethodInternal(ILContext il, List<SimulationNodeInfo> nodes, out StateType localStateType, bool allowUnknownPatterns, out int nodeSwitchIndex)
+    static void RewriteMethodInternal(
+        ILContext il,
+        List<SimulationNodeInfo> nodes,
+        out StateType localStateType,
+        bool allowUnknownPatterns,
+        out int nodeSwitchIndex,
+        out bool possiblyNonDeterministic
+    )
     {
         ParameterDefinition entryParam = new("startFromNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
         ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
@@ -135,7 +144,7 @@ public class SpawnAnNPCRewriter
         ILCursor c = new(il);
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
-        
+
         ILLabel mainEntryLabel = il.DefineLabel();
         List<ILLabel> entryJumps = [];
 
@@ -178,7 +187,7 @@ public class SpawnAnNPCRewriter
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
         RewriteOldArgAccessors(c, contextParam);
-        // VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
+        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
 
         localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 
@@ -437,7 +446,7 @@ public class SpawnAnNPCRewriter
                                 if (dupInfo is null)
                                     break;
 
-                                StackValue inputValue = dupInfo.inValues[info.inValues.Count - 1];
+                                StackValue inputValue = dupInfo.inValues[dupInfo.inValues.Count - 1];
                                 if (inputValue.producedBy.Count != 1)
                                     break;
 
@@ -465,18 +474,12 @@ public class SpawnAnNPCRewriter
             Console.WriteLine();
         }
 
-        if (nested)
-            return sideEffects == 0;
-
-        if (sideEffects > 0)
-            throw new Exception($"{sideEffects} instructions with side-effects detected");
-
-        return true;
+        return sideEffects == 0;
     }
 
     static void InlineCalls(ILContext il)
     {
-        bool IsATestInlineMethod(MethodReference method)
+        static bool IsATestInlineMethod(MethodReference method)
         {
             if (method.DeclaringType is null)
                 return false;
@@ -500,7 +503,7 @@ public class SpawnAnNPCRewriter
         MethodBase[] inlineMethodsPass2 = [
             Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn_ChanceToBeHolidaySlime"),
         ];
-        
+
         CallInliner.InlineCalls(il, m => inlineMethodsPass2.Any(m.Is));
     }
 }
@@ -515,10 +518,13 @@ public class SpawnAnNPCRewriteData
 
     public StateType LocalStateType;
 
-    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, StateType localStateType)
+    public bool PossiblyNonDeterministic;
+
+    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, StateType localStateType, bool possiblyNonDeterministic)
     {
         Method = method;
         Nodes = nodes;
         LocalStateType = localStateType;
+        PossiblyNonDeterministic = possiblyNonDeterministic;
     }
 }

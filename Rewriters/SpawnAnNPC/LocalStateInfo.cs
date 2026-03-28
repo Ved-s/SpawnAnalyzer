@@ -6,7 +6,7 @@ using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
 using OpCodes = Mono.Cecil.Cil.OpCodes;
 
-namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
+namespace SpawnAnalyzer.Rewriters.SpawnAnNPC;
 
 public class LocalStateInfo
 {

@@ -40,6 +40,8 @@ public class SpawnAnalysis
     Point? lastHoveredSpot;
     private readonly SimulatorImpl impl;
 
+    public bool NonDeterministic = false;
+
     public SpawnAnalysis(Player player, SimulatorImpl impl)
     {
         this.impl = impl;
@@ -107,6 +109,7 @@ public class SpawnAnalysis
     public void Simulate()
     {
         results.Clear();
+        NonDeterministic = false;
 
         TimeSpan totalAnalysisTime = default;
         Stopwatch sw = Stopwatch.StartNew();
@@ -120,6 +123,8 @@ public class SpawnAnalysis
 
         sw.Stop();
         Console.WriteLine($"Simulated {foundSpawnSpots.Count} spawn spots in {sw.Elapsed.TotalMilliseconds:0.00}ms (with {totalAnalysisTime.TotalMilliseconds:0.00}ms spent analyzing)");
+    
+
     }
 
     public void DrawOverlay(SpriteBatch sb)

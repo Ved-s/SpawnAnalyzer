@@ -16,7 +16,7 @@ using Terraria.Utilities;
 using OpCodes = Mono.Cecil.Cil.OpCodes;
 using ROpCodes = System.Reflection.Emit.OpCodes;
 
-namespace SpawnAnalyzer.Rewriters.SpawnANnNPC;
+namespace SpawnAnalyzer.Rewriters.SpawnAnNPC;
 
 class NodeRewriter
 {

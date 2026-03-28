@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.Audio;
+using Terraria.GameContent.UI.Elements;
 using Terraria.ID;
 using Terraria.UI;
 
@@ -14,6 +15,8 @@ public class AnalyzerTab : Tab
     UIButton analyzeHereButton;
     UIButton clearAnalysisButton;
     UIButton reAnalyzeButton;
+
+    UIText nonDeterministicText;
 
     public AnalyzerTab()
     {
@@ -65,6 +68,13 @@ public class AnalyzerTab : Tab
             SpawnAnalyzerUI.SendEvent(new NewPosSelectedEvent(SpawnAnalyzerUI.SelectedPos));
         };
 
+        nonDeterministicText = new("Warning! Simulated code contains randomness or side-effects.\nSome spawns may not appear in the list or have wrong values.")
+        {
+            Height = new(50, 0),
+            TextColor = Color.Orange
+        };
+        nonDeterministicText.Width = nonDeterministicText.MinWidth;
+
         grabDragElements.Add(centerElement);
         UpdateCenterElement();
     }
@@ -73,29 +83,44 @@ public class AnalyzerTab : Tab
     {
         centerElement.RemoveAllChildren();
 
-        float height = 0;
         float width = 0;
 
+        float y = 0;
+
+        analyzeHereButton.Top.Pixels = y;
+        y += analyzeHereButton.Height.Pixels;
+
         centerElement.Append(analyzeHereButton);
-        height += analyzeHereButton.Height.Pixels;
         width = Math.Max(width, analyzeHereButton.Width.Pixels);
 
         if (SpawnAnalyzer.LastAnalysis is not null)
         {
-            height += 10;
+            y += 10;
+            clearAnalysisButton.Top.Pixels = y;
+            reAnalyzeButton.Top.Pixels = y;
 
             centerElement.Append(clearAnalysisButton);
             centerElement.Append(reAnalyzeButton);
 
-            height += Math.Max(clearAnalysisButton.Height.Pixels, reAnalyzeButton.Height.Pixels);
+            y += Math.Max(clearAnalysisButton.Height.Pixels, reAnalyzeButton.Height.Pixels);
             width = Math.Max(width, clearAnalysisButton.Width.Pixels + 10 + reAnalyzeButton.Width.Pixels);
         }
 
-        centerElement.Width.Pixels = width;
-        centerElement.Height.Pixels = height;
+        if (SpawnAnalyzer.DefaultImpl?.SpawnAnNpcRewrite.PossiblyNonDeterministic is true) {
+            y += 10;
+            nonDeterministicText.Top.Pixels = y;
 
-        centerElement.Left.Pixels = -width/2;
-        centerElement.Top.Pixels = -height/2;
+            centerElement.Append(nonDeterministicText);
+
+            y += nonDeterministicText.Height.Pixels;
+            width = Math.Max(width, nonDeterministicText.Width.Pixels);
+        }
+
+        centerElement.Width.Pixels = width;
+        centerElement.Height.Pixels = y;
+
+        centerElement.Left.Pixels = -width / 2;
+        centerElement.Top.Pixels = -y / 2;
 
         Recalculate();
 

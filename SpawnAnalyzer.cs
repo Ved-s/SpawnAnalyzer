@@ -4,27 +4,21 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
-using System.Security;
-using System.Security.Permissions;
 using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
-using MonoMod.Logs;
 using MonoMod.RuntimeDetour;
-using MonoMod.Utils;
-using SpawnAnalyzer.Rewriters.SpawnANnNPC;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using SpawnAnalyzer.Simulation;
 using SpawnAnalyzer.UI;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.UI;
+using Terraria.Utilities;
 
 namespace SpawnAnalyzer;
 
@@ -65,6 +59,8 @@ public class SpawnAnalyzer
     internal static Hook? NPCSpawnerSpawnNPCHook;
     internal static Hook? NPCNewNPCHook;
 
+    internal static ILHook? UnifiedRandomInternalSample;
+
     static Dictionary<string, Texture2D> TextureCache = new();
 
     static int DebugCountdown = -1;
@@ -83,6 +79,7 @@ public class SpawnAnalyzer
         ]), On_NPC_Spawner_SpawnNPC);
 
         NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
+        UnifiedRandomInternalSample = new ILHook(Utils.GetMethodOrThrow<UnifiedRandom>("InternalSample"), IL_UnifiedRandom_InternalSample);
 
         ImplInitThread = new Thread(() =>
         {
@@ -125,7 +122,7 @@ public class SpawnAnalyzer
 
     public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false, bool printChances = false)
     {
-        bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimulationNode?> simNodes, bool report, int depth, ref int faildepth)
+        static bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimulationNode?> simNodes, bool report, int depth, ref int faildepth)
         {
             TestMethods.TestNode testnode = testNodes[testindex];
             SimulationNode? simnode = simNodes[simindex];
@@ -494,9 +491,10 @@ public class SpawnAnalyzer
     delegate NPC orig_NPC_Spawner_SpawnNPC(NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static NPC On_NPC_Spawner_SpawnNPC(orig_NPC_Spawner_SpawnNPC orig, NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is not null)
+        if (SpawnSimulationContext.CurrentlySimulatingContext is {} ctx)
         {
-            SpawnSimulationContext.CurrentlySimulatingContext.AddCurrentConnectionSpawn(new()
+            ctx.NonDeterministic = true;
+            ctx.AddCurrentConnectionSpawn(new()
             {
                 x = X,
                 y = Y,
@@ -512,9 +510,10 @@ public class SpawnAnalyzer
     delegate int orig_NPC_NewNPC(IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static int On_NPC_NewNPC(orig_NPC_NewNPC orig, IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is not null)
+        if (SpawnSimulationContext.CurrentlySimulatingContext is {} ctx)
         {
-            SpawnSimulationContext.CurrentlySimulatingContext.AddCurrentConnectionSpawn(new()
+            ctx.NonDeterministic = true;
+            ctx.AddCurrentConnectionSpawn(new()
             {
                 x = X,
                 y = Y,
@@ -525,6 +524,44 @@ public class SpawnAnalyzer
         }
 
         return orig(source, X, Y, Type, Start, ai0, ai1, ai2, ai3, Target);
+    }
+
+    static void IL_UnifiedRandom_InternalSample(ILContext il) {
+        static void RandomCalledOnSimulation(SpawnSimulationContext ctx) {
+            ctx.NonDeterministic = true;
+
+            // Maybe report it in the console?
+        }
+
+        Action<SpawnSimulationContext> RandomCalledOnSimulationDelegate = RandomCalledOnSimulation;
+        MethodInfo RandomCalledOnSimulationMethod = RandomCalledOnSimulationDelegate.Method;
+
+        ILCursor c = new(il);
+
+        ILLabel realCode = c.DefineLabel();
+
+        ILLabel contextHook = c.DefineLabel();
+
+        PropertyInfo prop = Utils.GetPropertyOrThrow(typeof(SpawnSimulationContext), nameof(SpawnSimulationContext.CurrentlySimulatingContext));
+
+        // Quickly call and jump to real code when null
+        c.Emit(OpCodes.Call, prop.GetMethod!);
+        c.Emit(OpCodes.Brfalse, realCode);
+
+        // Not null on the first try, get the actual value
+        c.Emit(OpCodes.Call, prop.GetMethod!);
+        c.Emit(OpCodes.Dup);
+
+        // But what if it's suddenly null?
+        c.Emit(OpCodes.Brtrue, contextHook);
+        c.Emit(OpCodes.Pop);
+        c.Emit(OpCodes.Br, realCode);
+
+        c.MarkLabel(contextHook);
+
+        c.Emit(OpCodes.Call, RandomCalledOnSimulationMethod);
+
+        c.MarkLabel(realCode);
     }
 
     internal static bool MatchInstructions(ILContext c, int pos, out int matchEndPos, params Func<Instruction, bool>[] matchers)

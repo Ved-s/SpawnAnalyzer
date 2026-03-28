@@ -1,6 +1,6 @@
 using Microsoft.Xna.Framework;
 using SpawnAnalyzer.Rewriters;
-using SpawnAnalyzer.Rewriters.SpawnANnNPC;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using Terraria;
 
 namespace SpawnAnalyzer;

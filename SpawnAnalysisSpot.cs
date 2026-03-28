@@ -29,6 +29,8 @@ public class SpawnAnalysisSpot
 
     readonly SpawnSimulationContext simulationContext;
 
+    public bool NonDeterministic = false;
+
     public SpawnAnalysisSpot(SpawnAnalysis analysis, Point position, SpawnParamsStage1 p, SimulatorImpl impl)
     {
         this.analysis = analysis;
@@ -57,6 +59,9 @@ public class SpawnAnalysisSpot
     internal void Simulate(out TimeSpan analysisTime, SpawnAnalysisResults outResults)
     {
         SimulationResult? results = simulationContext.Simulate();
+        NonDeterministic = simulationContext.NonDeterministic;
+        analysis.NonDeterministic |= NonDeterministic;
+        
         analysisTime = default;
         if (results is null)
             return;

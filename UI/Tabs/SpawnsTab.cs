@@ -33,6 +33,8 @@ public class SpawnsTab : Tab
     UIButton[] chanceModeButtons;
     Selection<UIButton> chanceModeSelection;
 
+    UIText nonDeterministicText;
+
     DisplayMode? displayMode = null;
     ChanceMode? chanceMode = null;
 
@@ -124,6 +126,18 @@ public class SpawnsTab : Tab
             chanceModeButtons[i] = button;
             Append(button);
         }
+
+        nonDeterministicText = new("Warning! Some spawn entries will not show up or\nhave weird data due to side-effects in the code")
+        {
+            Top = new(15, 0),
+            Left = new(6 + 120 + 300 + 10, 0),
+            Width = new(-(6 + 120 + 300 + 20), 1),
+            Height = new(60, 0),
+            TextColor = Color.Orange,
+            TextOriginX = 0,
+            OverflowHidden = true,
+            MinWidth = new(0, 0),
+        };
 
         headerText = new("")
         {
@@ -220,16 +234,48 @@ public class SpawnsTab : Tab
         {
             case NewSpawnAnalysisEvent:
                 UpdateDisplayModeButtons();
+                UpdateNonDeterministicWarning();
                 if (displayMode == DisplayMode.Area)
                     RebuildSpawnsList();
                 break;
 
             case NewPosSelectedEvent:
                 UpdateDisplayModeButtons();
+                UpdateNonDeterministicWarning();
                 if (displayMode != DisplayMode.Area)
                     RebuildSpawnsList();
                 break;
         }
+    }
+
+    void UpdateNonDeterministicWarning()
+    {
+        if (nonDeterministicText.Parent is not null)
+            nonDeterministicText.Remove();
+
+        bool showWarning = false;
+
+        SpawnAnalysis? analysis = SpawnAnalyzer.LastAnalysis;
+
+        if (analysis is not null)
+        {
+            switch (displayMode)
+            {
+                case DisplayMode.Starting:
+                    if (SpawnAnalyzerUI.SelectedPos is not null && analysis.foundSpawnSpots.TryGetValue(SpawnAnalyzerUI.SelectedPos.Value, out var spot))
+                    {
+                        showWarning = spot.NonDeterministic;
+                    }
+                    break;
+
+                default:
+                    showWarning = analysis.NonDeterministic;
+                    break;
+            }
+        }
+
+        if (showWarning)
+            Append(nonDeterministicText);
     }
 
     void RebuildSpawnsList()
@@ -343,19 +389,19 @@ public class SpawnsTab : Tab
 
         var mspawn = button.spawn;
 
-        sidePanel.Append(new UIText(Lang.GetNPCName(mspawn.id))
-        {
-            Top = new(4, 0),
-            Width = new(0, 1),
-            Height = new(30, 0),
-        });
-
         sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(mspawn.id))
         {
             Top = new(20, 0),
             Width = new(0, 1),
             Height = new(64, 0),
             ForceHover = true,
+        });
+
+        sidePanel.Append(new UIText(Lang.GetNPCName(mspawn.id))
+        {
+            Top = new(4, 0),
+            Width = new(0, 1),
+            Height = new(30, 0),
         });
 
         float y = 90;
@@ -414,18 +460,36 @@ public class SpawnsTab : Tab
                 TextOriginX = 0,
             });
 
-            sidePanel.Append(new UIText($"{spawn.chance * 100:0.0000}%")
+            string maybeLess = spawn.leaked switch
+            {
+                true => "<",
+                false => "",
+            };
+            Color chanceColor = spawn.leaked switch
+            {
+                true => Color.Red,
+                false => Color.White,
+            };
+
+            sidePanel.Append(new UIText($"{maybeLess}{spawn.chance * 100:0.0000}%")
             {
                 Top = new(y, 0),
                 Width = new(0, 1),
                 Height = new(30, 0),
                 TextOriginX = 1,
+                TextColor = chanceColor,
             });
 
             y += 20;
 
             if (displayMode != DisplayMode.Starting)
             {
+                string maybeMore = spawn.leaked switch
+                {
+                    true => ">",
+                    false => "",
+                };
+
                 double avgTicks = 1 / (double)spawn.chance;
                 double avgSeconds = avgTicks / 60;
 
@@ -437,14 +501,36 @@ public class SpawnsTab : Tab
                     TextOriginX = 0,
                 });
 
-                sidePanel.Append(new UIText(NPCSpawnButton.FormatTimeShort(avgSeconds))
+                sidePanel.Append(new UIText(maybeMore + NPCSpawnButton.FormatTimeShort(avgSeconds))
                 {
                     Top = new(y, 0),
                     Width = new(0, 1),
                     Height = new(30, 0),
                     TextOriginX = 1,
+                    TextColor = chanceColor,
                 });
 
+                y += 20;
+            }
+
+            if (spawn.leaked) {
+                sidePanel.Append(new UIText("Could not determine")
+                {
+                    Top = new(y, 0),
+                    Width = new(0, 1),
+                    Height = new(20, 0),
+                    TextOriginX = 0,
+                    TextColor = Color.Orange,
+                });
+                y += 20;
+                sidePanel.Append(new UIText("exact chance")
+                {
+                    Top = new(y, 0),
+                    Width = new(0, 1),
+                    Height = new(20, 0),
+                    TextOriginX = 0,
+                    TextColor = Color.Orange,
+                });
                 y += 20;
             }
 
@@ -551,6 +637,7 @@ public class SpawnsTab : Tab
         displayMode = mode;
         RebuildSpawnsList();
         UpdateChanceModeButtons();
+        UpdateNonDeterministicWarning();
     }
 
     void UpdateChanceModeButtons()
