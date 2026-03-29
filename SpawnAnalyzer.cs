@@ -326,7 +326,7 @@ public class SpawnAnalyzer
                                         }
                                     }
                                     firstline = false;
-                                    Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.x}, {spawn.y}");
+                                    Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.pos}");
                                 }
                             }
 
@@ -364,17 +364,22 @@ public class SpawnAnalyzer
                 {
                     Console.Write($"  {NPCID.Search.GetName(mspawn.id)} [{mspawn.id}]: ");
                     bool firstPos = true;
-                    foreach (var kvp in mspawn.spawns)
+                    foreach (var kvp in mspawn.IterAllSpawns())
                     {
                         if (!firstPos)
                             Console.Write(", ");
 
                         firstPos = false;
 
-                        Console.Write($"at {kvp.Key} [ ");
+                        if (kvp.Item1 is null)
+                            Console.Write($"no pos");
+                        else
+                            Console.Write($"at {kvp.Item1.Value}");
+
+                        Console.Write($" [ ");
 
                         bool firstSpawn = true;
-                        foreach (var spawn in kvp.Value.spawns)
+                        foreach (var spawn in kvp.Item2.spawns)
                         {
                             if (!firstSpawn)
                                 Console.Write(", ");
@@ -496,8 +501,7 @@ public class SpawnAnalyzer
             ctx.NonDeterministic = true;
             ctx.AddCurrentConnectionSpawn(new()
             {
-                x = X,
-                y = Y,
+                pos = new(X, Y),
                 npcId = Type,
                 leakedSpawn = true,
             });
@@ -515,8 +519,7 @@ public class SpawnAnalyzer
             ctx.NonDeterministic = true;
             ctx.AddCurrentConnectionSpawn(new()
             {
-                x = X,
-                y = Y,
+                pos = new(X, Y),
                 npcId = Type,
                 leakedSpawn = true,
             });

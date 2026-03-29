@@ -577,6 +577,38 @@ public class SpawnsTab : Tab
                     TextOriginX = 1,
                 });
             }
+
+            if (spawn.spawnOnPlayer)
+            {
+                UIPanel traitPanel = new()
+                {
+                    Width = new(0, 1),
+                    Height = new(32, 0),
+                    Top = new(y, 0),
+                };
+                y += traitPanel.Height.Pixels + 10;
+                traitPanel.SetPadding(0);
+                sidePanel.Append(traitPanel);
+
+                Main.instance.LoadItem(ItemID.SlimeCrown);
+                Texture2D icon = TextureAssets.Item[ItemID.SlimeCrown].Value;
+
+                traitPanel.Append(new UIImage(icon)
+                {
+                    Top = new(16 - icon.Height / 2, 0),
+                    Left = new(2 + 16 - icon.Width / 2, 0),
+                    RemoveFloatingPointsFromDrawPosition = true,
+                });
+
+                traitPanel.Append(new UIText("Spawns in area")
+                {
+                    Top = new(8, 0),
+                    Left = new(0, 0),
+                    Width = new(-6, 1),
+                    Height = new(30, 0),
+                    TextOriginX = 1,
+                });
+            }
         }
     }
 

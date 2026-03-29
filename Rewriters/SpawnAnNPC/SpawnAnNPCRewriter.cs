@@ -116,7 +116,8 @@ public class SpawnAnNPCRewriter
         }
 
         int size = 0;
-        foreach (Instruction instr in il.Instrs) {
+        foreach (Instruction instr in il.Instrs)
+        {
             size += instr.GetSize();
         }
 
@@ -165,11 +166,11 @@ public class SpawnAnNPCRewriter
 
         HashSet<FieldInfo> allowFields = new();
         HashSet<MethodBase> allowMethods = [
-
-            Utils.GetMethodOrThrow<SpawnSimulationContext>("NodeHit"),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>("ExitNodeHit"),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>("GetLastNodeStackStateClone"),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>("GetCurrentTimelineState"),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.NodeHit)),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.ExitNodeHit_SpawnNPC)),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.ExitNodeHit_SpawnOnPlayer)),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.GetLastNodeStackStateClone)),
+            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.GetCurrentTimelineState)),
 
             Utils.GetMethodOrThrow<NPC>("AnyNPCs"),
             Utils.GetMethodOrThrow<NPC>("CountNPCS"),
@@ -205,6 +206,8 @@ public class SpawnAnNPCRewriter
         }
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
+        RewriteSpawnOnPlayerCalls(c, contextParam, stack);
+
         RewriteOldArgAccessors(c, contextParam);
         possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
 
@@ -279,7 +282,6 @@ public class SpawnAnNPCRewriter
             {
                 c.Goto(c.Index - 6, MoveType.AfterLabel);
                 c.RemoveRange(7);
-                c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHit");
             }
             else
             {
@@ -293,8 +295,8 @@ public class SpawnAnNPCRewriter
                 c.Emit(OpCodes.Pop);
                 c.Emit(OpCodes.Pop);
                 c.Remove();
-                c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHit");
             }
+            c.Emit<SpawnSimulationContext>(OpCodes.Call, nameof(SpawnSimulationContext.ExitNodeHit_SpawnNPC));
 
             if (c.Next.MatchPop())
             {
@@ -318,7 +320,8 @@ public class SpawnAnNPCRewriter
             {
                 c.RemoveRange(2);
             }
-            else if (c.Next.MatchBr(out ILLabel? brTarget) && brTarget.Target!.OpCode == OpCodes.Pop) {
+            else if (c.Next.MatchBr(out ILLabel? brTarget) && brTarget.Target!.OpCode == OpCodes.Pop)
+            {
                 c.Emit(OpCodes.Ldnull); // todo: make CallInliner move Pops before branch
                 continue;
             }
@@ -337,6 +340,60 @@ public class SpawnAnNPCRewriter
             ulong totalSpawns = knownSpawns + unknownSpawns;
             double done = (double)knownSpawns / totalSpawns;
             throw new Exception($"{done * 100:0.0}% ({knownSpawns}/{totalSpawns}) of SpawnNPC calls patched");
+        }
+    }
+
+    static void RewriteSpawnOnPlayerCalls(ILCursor c, ParameterDefinition contextParam, StackAnalysis stack)
+    {
+        c.Index = 0;
+
+        while (c.TryGotoNext(
+            MoveType.AfterLabel,
+            x => x.MatchCallOrCallvirt<NPC>("SpawnOnPlayer")
+        ))
+        {
+            Instruction instr = c.Next!;
+            InstructionStackInfo stackinfo = stack.LookupInstruction(instr, out _)!;
+
+            StackValue targetValue = stackinfo.inValues[^6];
+
+            if (targetValue.producedBy.Count != 1) {
+                // todo: warnings
+                Console.WriteLine($"Unsupported target value producers for NPC.SpawnOnPlayer at IL_{instr.Offset:x4}");
+                continue;
+            }
+
+            Instruction targetProducer = targetValue.producedBy[0];
+
+            if (!targetProducer.MatchLdarg(5)) {
+                Console.WriteLine($"Unsupported target value producer for NPC.SpawnOnPlayer at IL_{instr.Offset:x4}");
+                continue;
+            }
+
+            targetProducer.OpCode = OpCodes.Ldarg;
+            targetProducer.Operand = contextParam;
+
+            if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 4, out _,
+                x => x.MatchLdcR4(out _),
+                x => x.MatchLdcR4(out _),
+                x => x.MatchLdcR4(out _),
+                x => x.MatchLdcR4(out _)
+            ))
+            {
+                c.Goto(c.Index - 4, MoveType.AfterLabel);
+                c.RemoveRange(4);
+            }
+            else
+            {
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+                c.Emit(OpCodes.Pop);
+            }
+
+            c.Remove();
+
+            c.Emit<SpawnSimulationContext>(OpCodes.Call, nameof(SpawnSimulationContext.ExitNodeHit_SpawnOnPlayer));
         }
     }
 
@@ -485,12 +542,14 @@ public class SpawnAnNPCRewriter
                     }
                 }
             }
-            else if (stack is not null && StindOpcodes.Contains(c.Next.OpCode)) {
+            else if (stack is not null && StindOpcodes.Contains(c.Next.OpCode))
+            {
                 InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
                 if (info is not null)
                 {
                     StackValue valref = info.inValues[^2];
-                    if (valref.producedBy.All(p => p.OpCode == OpCodes.Ldloca || p.OpCode == OpCodes.Ldloca_S)) {
+                    if (valref.producedBy.All(p => p.OpCode == OpCodes.Ldloca || p.OpCode == OpCodes.Ldloca_S))
+                    {
                         continue;
                     }
                 }
@@ -745,7 +804,8 @@ public class SpawnAnNPCRewriter
         dc.Index = 0;
         if (dc.TryGotoNext(
             x => x.MatchLdsfld<Main>("rand")
-        )) {
+        ))
+        {
             Console.WriteLine("Warning! ReplaceGetZombieSetings fail, there's more unknown randomness in GetZombieSetings");
             return;
         }
@@ -831,7 +891,8 @@ public class SpawnAnNPCRewriter
         // Environment.Exit(1);
     }
 
-    static void RemoveDefaultTargetSet(ILContext il) {
+    static void RemoveDefaultTargetSet(ILContext il)
+    {
         /*
             IL_AAAB: ldarg.0
             IL_AAAC: ldarg.s   target (5)
@@ -842,10 +903,11 @@ public class SpawnAnNPCRewriter
 
         while (c.TryGotoNext(
             MoveType.AfterLabel,
-            x=>x.MatchLdarg(0),
-            x=>x.MatchLdarg(5),
-            x=>x.MatchStfld<NPC.Spawner>("defaultTarget")
-        )) {
+            x => x.MatchLdarg(0),
+            x => x.MatchLdarg(5),
+            x => x.MatchStfld<NPC.Spawner>("defaultTarget")
+        ))
+        {
             c.RemoveRange(3);
         }
     }

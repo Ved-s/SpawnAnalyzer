@@ -88,7 +88,7 @@ public class SpawnAnalysisSpot
                 outResults.total.Add(mspawn.id, totalSpawnsId);
             }
 
-            foreach (var posSpawn in mspawn.spawns)
+            foreach (var posSpawn in mspawn.posSpawns)
             {
                 if (!outResults.final.TryGetValue(posSpawn.Key, out var finslSpawnsPos))
                 {
@@ -107,6 +107,13 @@ public class SpawnAnalysisSpot
                 posSpawn.Value.MultiplyChance(chance * analysis.spawnRateChanceMultiplier);
                 finalSpawnsId.MergeFrom(posSpawn.Value, true);
                 totalSpawnsId.MergeFrom(posSpawn.Value, false);
+            }
+
+            if (mspawn.noPosSpawns is not null) {
+                startSpawnsId.MergeFrom(mspawn.noPosSpawns, true);
+
+                mspawn.noPosSpawns.MultiplyChance(chance * analysis.spawnRateChanceMultiplier);
+                totalSpawnsId.MergeFrom(mspawn.noPosSpawns, false);
             }
         }
         sw.Stop();

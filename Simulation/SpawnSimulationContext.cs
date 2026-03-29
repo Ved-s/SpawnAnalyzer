@@ -5,6 +5,7 @@ using Terraria;
 using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using Terraria.ID;
 using Terraria.GameContent.Bestiary;
+using Microsoft.Xna.Framework;
 
 namespace SpawnAnalyzer.Simulation;
 
@@ -162,13 +163,21 @@ public class SpawnSimulationContext
         return 0;
     }
 
-    internal void ExitNodeHit(int x, int y, int type)
+    internal void ExitNodeHit_SpawnNPC(int x, int y, int type)
     {
         AddCurrentConnectionSpawn(new()
         {
             npcId = type,
-            x = x,
-            y = y,
+            pos = new(x, y),
+        });
+    }
+
+    internal void ExitNodeHit_SpawnOnPlayer(int type)
+    {
+        AddCurrentConnectionSpawn(new()
+        {
+            npcId = type,
+            spawnOnPlayer = true,
         });
     }
 
@@ -443,13 +452,17 @@ public class NextNode
 public class NextSpawn
 {
     public int npcId;
-    public int x;
-    public int y;
+    public Point? pos;
 
     /// <summary>
     /// Whether the spawn was hit from simulation itself or from an uncontrolled helper method
     /// </summary>
     public bool leakedSpawn = false;
+
+    /// <summary>
+    /// Whether the spawn uses NPC.SpawnOnPlayer
+    /// </summary>
+    public bool spawnOnPlayer = false;
 }
 
 public class SimulationNode

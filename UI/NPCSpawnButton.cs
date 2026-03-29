@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
 using SpawnAnalyzer.Simulation;
 using Terraria;
 using Terraria.Audio;
@@ -77,6 +78,7 @@ public class NPCSpawnButton : UIElement, ISelectable
 
         float chance = 0;
         bool affectedByLuck = false;
+        bool spawnOnPlayer = false;
         bool leaked = false;
 
         foreach (var spawn in spawn.spawns)
@@ -89,6 +91,9 @@ public class NPCSpawnButton : UIElement, ISelectable
 
             if (spawn.affectedByLuck)
                 affectedByLuck = true;
+
+            if (spawn.spawnOnPlayer)
+                spawnOnPlayer = true;
         }
 
         string chanceText;
@@ -128,13 +133,34 @@ public class NPCSpawnButton : UIElement, ISelectable
             ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, extraText, extraTextPos, Color.White, 0f, Vector2.One, Vector2.One);
         }
 
+        int iconX = dims.Right;
+
         if (affectedByLuck)
         {
             Texture2D luck = SpawnAnalyzer.GetTexture("Luck");
 
-            Rectangle luckRect = new(dims.Right - luck.Width, dims.Top, luck.Width, luck.Height);
+            iconX -= 32;
+
+            Rectangle luckRect = new(iconX, dims.Top, luck.Width, luck.Height);
 
             spriteBatch.Draw(luck, luckRect, Color.White);
+
+            iconX -= 4;
+        }
+
+        if (spawnOnPlayer) {
+            iconX -= 32;
+
+            Main.instance.LoadItem(ItemID.SlimeCrown);
+            Asset<Texture2D> slimeCrown = TextureAssets.Item[ItemID.SlimeCrown];
+
+            Point center = new(iconX + 16, dims.Top + 16);
+
+            Point drawPos = new(center.X - slimeCrown.Width() / 2, center.Y - slimeCrown.Height() / 2);
+
+            spriteBatch.Draw(slimeCrown.Value, drawPos.ToVector2(), Color.White);
+
+            iconX -= 4;
         }
     }
 
