@@ -154,6 +154,7 @@ public class AnalyzedSpawns
 {
     public Dictionary<int, AnalyzedMultiPosSpawn> spawns = new();
 
+    //todo: fix multiple dragonflies
     public void AddSpawn(NextSpawn spawn, NodeRollInfo rollInfo)
     {
         if (!spawns.TryGetValue(spawn.npcId, out AnalyzedMultiPosSpawn? multiposspawn))
@@ -311,7 +312,6 @@ public class AnalyzedMultiSpawn
 
     public void MergeFrom(AnalyzedMultiSpawn spawn, bool keepOriginal)
     {
-
         for (int i = 0; i < spawn.spawns.Count; i++)
         {
             if (spawns.Count <= i)

@@ -24,7 +24,6 @@ namespace SpawnAnalyzer;
 
 // TODO: Optimize 100% and 0% chances, merge same return value branches
 
-// TODO: warning about side-effects and inconsistent chances
 // TODO: no side effects in the simulated function
 // TODO: Spawner.ShouldSpawnInvasionEnemies in SetSpawnFlags
 
@@ -36,7 +35,6 @@ namespace SpawnAnalyzer;
 // TODO: build method block tree to determine when locals end
 // TODO: Rules for chances depending on other chances, end of SetSpawnFlagsForChosenTile
 
-// TODO: show initial spawning tile and final spawning tile in spawn UI
 // TODO: hovering over a spawn should highlight its spawning and final tiles
 // TODO: textures for overlay instead of rectangles
 

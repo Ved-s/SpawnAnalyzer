@@ -29,7 +29,6 @@ public class SimulatorImpl
     public delegate void GetSpawnRate(NPC.Spawner spawner, Player player, out int spawnRate, out int maxSpawns, SpawnerChances spawnParams);
     public GetSpawnRate GetSpawnRateImpl;
 
-    // TODO: offload to a different thread
     public SpawnAnNPCRewriteData SpawnAnNpcRewrite;
 
     public static SimulatorImpl GenerateImpl()
