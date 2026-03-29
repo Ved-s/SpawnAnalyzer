@@ -23,6 +23,7 @@ public class StateType
         {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListEq))},
         {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DEq))},
         {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DEq))},
+        {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileEq))},
     };
 
     static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
@@ -30,6 +31,7 @@ public class StateType
         {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListClone))},
         {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DClone))},
         {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DClone))},
+        {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileClone))},
     };
 
     public Type Type;
@@ -333,5 +335,30 @@ public class StateType
             }
 
         return clone;
+    }
+
+    static bool TileEq(Tile? a, Tile? b) {
+        if (ReferenceEquals(a, b))
+            return true;
+        
+        if (a is null || b is null)
+            return false;
+
+        return a.type == b.type &&
+		    a.wall == b.wall &&
+		    a.liquid == b.liquid &&
+		    a.sTileHeader == b.sTileHeader &&
+		    a.bTileHeader == b.bTileHeader &&
+		    a.bTileHeader2 == b.bTileHeader2 &&
+		    a.bTileHeader3 == b.bTileHeader3 &&
+		    a.frameX == b.frameX &&
+		    a.frameY == b.frameY;
+    }
+
+    static Tile? TileClone(Tile? a) {
+        if (a is null)
+            return null;
+
+        return new Tile(a);
     }
 }

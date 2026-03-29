@@ -397,6 +397,10 @@ public class StackAnalyzer
                     {
                         value = new(null, valueType, SimpleTypeFromSystemType(valueType));
                     }
+                    else if (instr.MatchLdelemRef())
+                    {
+                        value = new(null, null, SimpleType.Object);
+                    }
                     else if (LdindSimpleOpcodes.TryGetValue(opCode, out valueType))
                     {
                         value = new(null, valueType, SimpleTypeFromSystemType(valueType));

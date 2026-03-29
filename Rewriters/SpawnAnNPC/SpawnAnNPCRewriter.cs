@@ -1,13 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Runtime.Serialization;
+using Microsoft.Xna.Framework;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
@@ -119,6 +115,15 @@ public class SpawnAnNPCRewriter
             }
         }
 
+        int size = 0;
+        foreach (Instruction instr in il.Instrs) {
+            size += instr.GetSize();
+        }
+
+        float sizeKb = (float)size / 1024;
+
+        Console.WriteLine($"SpawnAnNPC rewrite finished, code size: {sizeKb:0.00}kb, instructions: {il.Instrs.Count}, locals: {il.Body.Variables.Count}, nodes: {nodes.Count}");
+
         DMDHack.SetNullOriginalMethod(dmd);
 
         MethodInfo newMethod = dmd.Generate();
@@ -146,9 +151,8 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
-        List<Instruction> safeInstructions = new();
-
-        ReplaceGetZombieSetings(il, safeInstructions);
+        ReplaceGetZombieSetings(il);
+        RemoveDefaultTargetSet(il);
 
         InlineCalls(il);
         il.Instrs.FillWithFakeILOffsets();
@@ -160,7 +164,7 @@ public class SpawnAnNPCRewriter
         List<ILLabel> entryJumps = [];
 
         HashSet<FieldInfo> allowFields = new();
-        HashSet<MethodInfo> allowMethods = [
+        HashSet<MethodBase> allowMethods = [
 
             Utils.GetMethodOrThrow<SpawnSimulationContext>("NodeHit"),
             Utils.GetMethodOrThrow<SpawnSimulationContext>("ExitNodeHit"),
@@ -175,6 +179,8 @@ public class SpawnAnNPCRewriter
             Utils.GetMethodOrThrow<Collision>("SolidTiles", [typeof(int), typeof(int), typeof(int), typeof(int)]),
 
             Utils.GetMethodOrThrow(typeof(RuntimeHelpers), "InitializeArray", [typeof(Array), typeof(RuntimeFieldHandle)]),
+
+            typeof(Rectangle).GetConstructor([typeof(int), typeof(int), typeof(int), typeof(int)])!,
         ];
 
         NodeRewriter nodeRewriter = new(
@@ -200,7 +206,7 @@ public class SpawnAnNPCRewriter
 
         RewriteSpawnNPCCalls(c, contextParam, stack);
         RewriteOldArgAccessors(c, contextParam);
-        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, safeInstructions, stack, false);
+        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
 
         localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
 
@@ -271,7 +277,7 @@ public class SpawnAnNPCRewriter
                 _ => true
             ))
             {
-                c.Index -= 6;
+                c.Goto(c.Index - 6, MoveType.AfterLabel);
                 c.RemoveRange(7);
                 c.Emit<SpawnSimulationContext>(OpCodes.Call, "ExitNodeHit");
             }
@@ -311,6 +317,10 @@ public class SpawnAnNPCRewriter
             ))
             {
                 c.RemoveRange(2);
+            }
+            else if (c.Next.MatchBr(out ILLabel? brTarget) && brTarget.Target!.OpCode == OpCodes.Pop) {
+                c.Emit(OpCodes.Ldnull); // todo: make CallInliner move Pops before branch
+                continue;
             }
             else
             {
@@ -377,7 +387,7 @@ public class SpawnAnNPCRewriter
         }
     }
 
-    static bool VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, IEnumerable<Instruction> allowInstructions, StackAnalysis? stack, bool nested)
+    static bool VerifyNoSideEffects(ILCursor c, IEnumerable<FieldInfo> allowFields, IEnumerable<MethodBase> allowMethods, StackAnalysis? stack, bool nested)
     {
         int sideEffects = 0;
 
@@ -387,9 +397,6 @@ public class SpawnAnNPCRewriter
             x => OutsideWritingOpcodes.Contains(x.OpCode)
         ))
         {
-            if (allowInstructions.Contains(c.Next!)) {
-                continue;
-            }
             if (c.Next!.Operand is MethodReference method)
             {
                 MethodBase resolved = method.ResolveReflection();
@@ -424,7 +431,7 @@ public class SpawnAnNPCRewriter
                 DynamicMethodDefinition dmd = new(resolved);
                 ILContext ilc = new(dmd.Definition);
 
-                if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, [], null, true))
+                if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, null, true))
                 {
                     continue;
                 }
@@ -477,7 +484,16 @@ public class SpawnAnNPCRewriter
                             continue;
                     }
                 }
-
+            }
+            else if (stack is not null && StindOpcodes.Contains(c.Next.OpCode)) {
+                InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
+                if (info is not null)
+                {
+                    StackValue valref = info.inValues[^2];
+                    if (valref.producedBy.All(p => p.OpCode == OpCodes.Ldloca || p.OpCode == OpCodes.Ldloca_S)) {
+                        continue;
+                    }
+                }
             }
 
             if (nested)
@@ -508,9 +524,20 @@ public class SpawnAnNPCRewriter
             return resolved.GetCustomAttribute<TestMethods.TestInlineAttribute>() is not null;
         }
         MethodBase[] inlineMethodsPass1 = [
-            Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn"),
             Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnSpider"),
-            // Utils.GetMethodOrThrow<NPC>("FindCattailTop"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnRockGolem"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnUndergroundFairy"),
+
+            Utils.GetMethodOrThrow<NPC.Spawner>("GetBasicSlimeToSpawn"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("GetGemSquirrelToSpawn"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("GetGemBunnyToSpawn"),
+
+            Utils.GetMethodOrThrow<NPC.Spawner>("SpawnHornet"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("SpawnFrog"),
+            Utils.GetMethodOrThrow<NPC.Spawner>("SpawnLavaBaitCritters"),
+
+            Utils.GetMethodOrThrow<NPC>("FindCattailTop"),
+            Utils.GetMethodOrThrow<NPC>("NearSpikeBall"),
         ];
 
         CallInliner.InlineAllCalls(il, m => inlineMethodsPass1.Any(m.Is) || IsATestInlineMethod(m));
@@ -522,7 +549,7 @@ public class SpawnAnNPCRewriter
         CallInliner.InlineAllCalls(il, m => inlineMethodsPass2.Any(m.Is));
     }
 
-    static void ReplaceGetZombieSetings(ILContext il, List<Instruction> safeInstructions)
+    static void ReplaceGetZombieSetings(ILContext il)
     {
         ILCursor c = new(il);
 
@@ -757,12 +784,6 @@ public class SpawnAnNPCRewriter
             return;
         }
 
-        foreach (Instruction instr in dc.Instrs) {
-            if (StindOpcodes.Contains(instr.OpCode)) {
-                safeInstructions.Add(instr);
-            }
-        }
-
         Instruction newEnd = c.Next!;
 
         c.Emit(OpCodes.Nop);
@@ -808,6 +829,25 @@ public class SpawnAnNPCRewriter
         // il.FancyPrintout();
 
         // Environment.Exit(1);
+    }
+
+    static void RemoveDefaultTargetSet(ILContext il) {
+        /*
+            IL_AAAB: ldarg.0
+            IL_AAAC: ldarg.s   target (5)
+            IL_AAAE: stfld     int32 Terraria.NPC/Spawner::defaultTarget
+        */
+
+        ILCursor c = new(il);
+
+        while (c.TryGotoNext(
+            MoveType.AfterLabel,
+            x=>x.MatchLdarg(0),
+            x=>x.MatchLdarg(5),
+            x=>x.MatchStfld<NPC.Spawner>("defaultTarget")
+        )) {
+            c.RemoveRange(3);
+        }
     }
 }
 

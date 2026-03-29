@@ -31,7 +31,7 @@ class NodeRewriter
     readonly VariableDefinition tempNullBoolVar;
     readonly List<ILLabel> entryJumps;
     readonly HashSet<FieldInfo> allowFields;
-    readonly HashSet<MethodInfo> allowMethods;
+    readonly HashSet<MethodBase> allowMethods;
     readonly StackAnalysis stack;
 
     static Dictionary<Mono.Cecil.Cil.OpCode, EqualityType> ConditionalOpcodeEqualityTypes = new()
@@ -71,7 +71,7 @@ class NodeRewriter
         VariableDefinition tempNullBoolVar,
         List<ILLabel> entryJumps,
         HashSet<FieldInfo> allowFields,
-        HashSet<MethodInfo> allowMethods,
+        HashSet<MethodBase> allowMethods,
         StackAnalysis stack
     )
     {

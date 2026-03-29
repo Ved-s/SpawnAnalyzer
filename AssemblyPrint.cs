@@ -94,7 +94,7 @@ static class AssemblyPrint
                     if (resolvedField is null)
                     {
                         Console.Write(DnSpyAnsiColors.comment);
-                        Console.Write(" /* unresolved */");
+                        Console.Write("/* unresolved */ ");
                         Print(field);
                     }
                     else
@@ -120,7 +120,7 @@ static class AssemblyPrint
                     if (resolvedMethod is null)
                     {
                         Console.Write(DnSpyAnsiColors.comment);
-                        Console.Write(" /* unresolved */");
+                        Console.Write("/* unresolved */ ");
                         Print(method);
                     }
                     else
@@ -146,7 +146,7 @@ static class AssemblyPrint
                     if (resolvedType is null)
                     {
                         Console.Write(DnSpyAnsiColors.comment);
-                        Console.Write(" /* unresolved */");
+                        Console.Write("/* unresolved */ ");
                         Print(type);
                     }
                     else
