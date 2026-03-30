@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
@@ -15,7 +16,8 @@ namespace SpawnAnalyzer.UI;
 
 public class NPCSpawnButton : UIElement, ISelectable
 {
-    public readonly AnalyzedMultiSpawn spawn;
+    public readonly List<AnalyzedSpawn> spawns;
+    public readonly int npcid;
 
     readonly UIEntityIcon icon;
     readonly UIPanel panel;
@@ -44,9 +46,10 @@ public class NPCSpawnButton : UIElement, ISelectable
         }
     }
 
-    public NPCSpawnButton(AnalyzedMultiSpawn spawn, Selection<NPCSpawnButton> selection)
+    public NPCSpawnButton(int npcid, List<AnalyzedSpawn> spawns, Selection<NPCSpawnButton> selection)
     {
-        this.spawn = spawn;
+        this.npcid = npcid;
+        this.spawns = spawns;
         this.selection = selection;
 
         Height.Set(72f, 0f);
@@ -60,7 +63,7 @@ public class NPCSpawnButton : UIElement, ISelectable
         };
         panel.SetPadding(2);
 
-        icon = new(new UnlockableNPCEntryIcon(spawn.id))
+        icon = new(new UnlockableNPCEntryIcon(npcid))
         {
             Width = new(68f, 0),
             Height = new(68f, 0),
@@ -81,7 +84,7 @@ public class NPCSpawnButton : UIElement, ISelectable
         bool spawnOnPlayer = false;
         bool leaked = false;
 
-        foreach (var spawn in spawn.spawns)
+        foreach (var spawn in spawns)
         {
             if (spawn.chance > chance)
             {
@@ -126,9 +129,9 @@ public class NPCSpawnButton : UIElement, ISelectable
 
         ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, chanceText, chanceTextPos, color, 0f, Vector2.One, Vector2.One);
 
-        if (spawn.spawns.Count > 1)
+        if (spawns.Count > 1)
         {
-            string extraText = $"+{spawn.spawns.Count - 1}";
+            string extraText = $"+{spawns.Count - 1}";
             Vector2 extraTextPos = dims.BottomRight() - new Vector2(5, 13) - FontAssets.MouseText.Value.MeasureString(extraText);
             ChatManager.DrawColorCodedStringWithShadow(spriteBatch, FontAssets.MouseText.Value, extraText, extraTextPos, Color.White, 0f, Vector2.One, Vector2.One);
         }

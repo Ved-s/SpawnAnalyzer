@@ -45,7 +45,7 @@ namespace SpawnAnalyzer;
 
 public class SpawnAnalyzer
 {
-    public static SpawnAnalysis? LastAnalysis {get; private set; }
+    public static SpawnAnalysis? LastAnalysis { get; private set; }
 
     public static SimulatorImpl? DefaultImpl;
     private static Thread? ImplInitThread;
@@ -358,26 +358,20 @@ public class SpawnAnalyzer
                 AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
 
                 Console.WriteLine("Calculated chances:");
-                foreach (var mspawn in spawnChances.spawns.Values)
+                foreach (var mspawn in spawnChances.npcSpawns.Values)
                 {
                     Console.Write($"  {NPCID.Search.GetName(mspawn.id)} [{mspawn.id}]: ");
                     bool firstPos = true;
-                    foreach (var kvp in mspawn.IterAllSpawns())
+                    foreach (var posSpawn in mspawn.spawns)
                     {
                         if (!firstPos)
                             Console.Write(", ");
 
                         firstPos = false;
-
-                        if (kvp.Item1 is null)
-                            Console.Write($"no pos");
-                        else
-                            Console.Write($"at {kvp.Item1.Value}");
-
                         Console.Write($" [ ");
 
                         bool firstSpawn = true;
-                        foreach (var spawn in kvp.Item2.spawns)
+                        foreach (var (pos, spawn) in posSpawn.Iter())
                         {
                             if (!firstSpawn)
                                 Console.Write(", ");
@@ -385,6 +379,11 @@ public class SpawnAnalyzer
                             firstSpawn = false;
 
                             Console.Write($"{spawn.chance * 100:0.0}%");
+
+                            if (pos is null)
+                                Console.Write($"no pos");
+                            else
+                                Console.Write($"at {pos.Value}");
 
                             if (spawn.affectedByLuck)
                                 Console.Write(" (luck)");
@@ -494,7 +493,7 @@ public class SpawnAnalyzer
     delegate NPC orig_NPC_Spawner_SpawnNPC(NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static NPC On_NPC_Spawner_SpawnNPC(orig_NPC_Spawner_SpawnNPC orig, NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is {} ctx)
+        if (SpawnSimulationContext.CurrentlySimulatingContext is { } ctx)
         {
             ctx.NonDeterministic = true;
             ctx.AddCurrentConnectionSpawn(new()
@@ -512,7 +511,7 @@ public class SpawnAnalyzer
     delegate int orig_NPC_NewNPC(IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static int On_NPC_NewNPC(orig_NPC_NewNPC orig, IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is {} ctx)
+        if (SpawnSimulationContext.CurrentlySimulatingContext is { } ctx)
         {
             ctx.NonDeterministic = true;
             ctx.AddCurrentConnectionSpawn(new()
@@ -527,8 +526,10 @@ public class SpawnAnalyzer
         return orig(source, X, Y, Type, Start, ai0, ai1, ai2, ai3, Target);
     }
 
-    static void IL_UnifiedRandom_InternalSample(ILContext il) {
-        static void RandomCalledOnSimulation(SpawnSimulationContext ctx) {
+    static void IL_UnifiedRandom_InternalSample(ILContext il)
+    {
+        static void RandomCalledOnSimulation(SpawnSimulationContext ctx)
+        {
             ctx.NonDeterministic = true;
 
             // Maybe report it in the console?

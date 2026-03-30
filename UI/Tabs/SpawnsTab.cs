@@ -280,11 +280,11 @@ public class SpawnsTab : Tab
 
     void RebuildSpawnsList()
     {
-        int? selectednpcid = spawnButtonSelection.CurrentSelection?.spawn.id;
+        int? selectednpcid = spawnButtonSelection.CurrentSelection?.npcid;
         spawnButtonsContainer.RemoveAllChildren();
         bool clearSelection = true;
 
-        Dictionary<int, AnalyzedMultiSpawn>? spawns = null;
+        Dictionary<int, List<AnalyzedSpawn>>? spawns = null;
 
         SpawnAnalysisResults? results = SpawnAnalyzer.LastAnalysis?.results;
 
@@ -312,16 +312,16 @@ public class SpawnsTab : Tab
 
         if (spawns is not null)
         {
-            foreach (var spawn in spawns.Values.OrderByDescending(s => s.spawns.Max(s => s.chance)))
+            foreach (var (npcid, spawn) in spawns.OrderByDescending(s => s.Value.Max(s => s.chance)))
             {
-                NPCSpawnButton button = new(spawn, spawnButtonSelection)
+                NPCSpawnButton button = new(npcid, spawn, spawnButtonSelection)
                 {
                     ShowChanceAsAverageTime = chanceMode == ChanceMode.Time
                 };
 
                 spawnButtonsContainer.Append(button);
 
-                if (selectednpcid == spawn.id)
+                if (selectednpcid == npcid)
                 {
                     spawnButtonSelection.CurrentSelection = button;
                     clearSelection = false;
@@ -387,9 +387,7 @@ public class SpawnsTab : Tab
         if (button is null)
             return;
 
-        var mspawn = button.spawn;
-
-        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(mspawn.id))
+        sidePanel.Append(new UIEntityIcon(new UnlockableNPCEntryIcon(button.npcid))
         {
             Top = new(20, 0),
             Width = new(0, 1),
@@ -397,7 +395,7 @@ public class SpawnsTab : Tab
             ForceHover = true,
         });
 
-        sidePanel.Append(new UIText(Lang.GetNPCName(mspawn.id))
+        sidePanel.Append(new UIText(Lang.GetNPCName(button.npcid))
         {
             Top = new(4, 0),
             Width = new(0, 1),
@@ -406,7 +404,7 @@ public class SpawnsTab : Tab
 
         float y = 90;
 
-        sidePanel.Append(new UIText($"Type: {mspawn.id}")
+        sidePanel.Append(new UIText($"Type: {button.npcid}")
         {
             Top = new(y, 0),
             Width = new(0, 1),
@@ -416,9 +414,9 @@ public class SpawnsTab : Tab
 
         y += 22;
 
-        for (int i = 0; i < mspawn.spawns.Count; i++)
+        for (int i = 0; i < button.spawns.Count; i++)
         {
-            AnalyzedSpawn spawn = mspawn.spawns[i];
+            AnalyzedSpawn spawn = button.spawns[i];
 
             if (i > 0)
             {

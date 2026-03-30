@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
@@ -61,7 +62,7 @@ public class SpawnAnalysisSpot
         SimulationResult? results = simulationContext.Simulate();
         NonDeterministic = simulationContext.NonDeterministic;
         analysis.NonDeterministic |= NonDeterministic;
-        
+
         analysisTime = default;
         if (results is null)
             return;
@@ -69,51 +70,90 @@ public class SpawnAnalysisSpot
         Stopwatch sw = Stopwatch.StartNew();
         AnalyzedSpawns spawnresults = SpawnNodeAnalyzer.Analyze(results.Value);
 
-        Dictionary<int, AnalyzedMultiSpawn> startSpawns = new();
-        outResults.starting[position] = startSpawns;
+        Dictionary<int, List<AnalyzedSpawn>> allStartSpawns = new();
+        outResults.starting[position] = allStartSpawns;
 
-        foreach (var mspawn in spawnresults.spawns.Values)
+        Dictionary<Point, List<AnalyzedSpawn>> finalPosSpawns = new();
+        List<AnalyzedSpawn> localTotalSpawns = new();
+
+        float chanceMultiplier = chance * analysis.spawnRateChanceMultiplier;
+
+        foreach (var (npcid, npcSpawns) in spawnresults.npcSpawns)
         {
-            mspawn.ConvertToTilePos();
+            npcSpawns.ConvertToTilePos();
 
-            if (!startSpawns.TryGetValue(mspawn.id, out var startSpawnsId))
+            List<AnalyzedSpawn> startSpawns = new();
+            allStartSpawns.Add(npcid, startSpawns);
+
+            if (!outResults.total.TryGetValue(npcid, out var totalSpawns))
             {
-                startSpawnsId = new(mspawn.id);
-                startSpawns.Add(mspawn.id, startSpawnsId);
+                totalSpawns = new();
+                outResults.total.Add(npcid, totalSpawns);
             }
 
-            if (!outResults.total.TryGetValue(mspawn.id, out var totalSpawnsId))
-            {
-                totalSpawnsId = new(mspawn.id);
-                outResults.total.Add(mspawn.id, totalSpawnsId);
-            }
+            finalPosSpawns.Clear();
+            localTotalSpawns.Clear();
 
-            foreach (var posSpawn in mspawn.posSpawns)
+            foreach (var spawn in npcSpawns.spawns)
             {
-                if (!outResults.final.TryGetValue(posSpawn.Key, out var finslSpawnsPos))
+                foreach (var (pos, posSpawn) in spawn.posSpawns)
                 {
-                    finslSpawnsPos = new();
-                    outResults.final.Add(posSpawn.Key, finslSpawnsPos);
+                    if (!finalPosSpawns.TryGetValue(pos, out var list))
+                    {
+                        list = new();
+                        finalPosSpawns.Add(pos, list);
+                    }
+
+                    list.Add(posSpawn);
                 }
 
-                if (!finslSpawnsPos.TryGetValue(mspawn.id, out var finalSpawnsId))
-                {
-                    finalSpawnsId = new(mspawn.id);
-                    finslSpawnsPos.Add(mspawn.id, finalSpawnsId);
-                }
+                var allSpawn = spawn.AllPositionsSpawn();
+                startSpawns.Add(allSpawn.Clone());
 
-                startSpawnsId.MergeFrom(posSpawn.Value, true);
-
-                posSpawn.Value.MultiplyChance(chance * analysis.spawnRateChanceMultiplier);
-                finalSpawnsId.MergeFrom(posSpawn.Value, true);
-                totalSpawnsId.MergeFrom(posSpawn.Value, false);
+                allSpawn.chance *= chanceMultiplier;
+                localTotalSpawns.Add(allSpawn);
             }
 
-            if (mspawn.noPosSpawns is not null) {
-                startSpawnsId.MergeFrom(mspawn.noPosSpawns, true);
+            for (int i = 0; i < localTotalSpawns.Count; i++)
+            {
+                if (totalSpawns.Count > i)
+                {
+                    totalSpawns[i].MergeFrom(localTotalSpawns[i]);
+                }
+                else
+                {
+                    totalSpawns.Add(localTotalSpawns[i].Clone());
+                }
+            }
 
-                mspawn.noPosSpawns.MultiplyChance(chance * analysis.spawnRateChanceMultiplier);
-                totalSpawnsId.MergeFrom(mspawn.noPosSpawns, false);
+            npcSpawns.MultiplyChance(chanceMultiplier);
+
+            foreach (var (pos, posSpawns) in finalPosSpawns)
+            {
+                if (!outResults.final.TryGetValue(pos, out var dict))
+                {
+                    dict = new();
+                    outResults.final.Add(pos, dict);
+                }
+
+                if (dict.TryGetValue(npcid, out var finalSpawnsId))
+                {
+                    for (int i = 0; i < posSpawns.Count; i++)
+                    {
+                        if (finalSpawnsId.Count > i)
+                        {
+                            finalSpawnsId[i].MergeFrom(posSpawns[i]);
+                        }
+                        else
+                        {
+                            finalSpawnsId.Add(posSpawns[i].Clone());
+                        }
+                    }
+                }
+                else
+                {
+                    dict.Add(npcid, posSpawns.Select(s => s.Clone()).ToList());
+                }
             }
         }
         sw.Stop();

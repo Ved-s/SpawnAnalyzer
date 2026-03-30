@@ -283,17 +283,17 @@ public class SpawnAnalysisResults
     /// <summary>
     /// Spawns at final points where they spawned
     /// </summary>
-    public Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> final = new();
+    public Dictionary<Point, Dictionary<int, List<AnalyzedSpawn>>> final = new();
 
     /// <summary>
     /// Spawns at points where they began
     /// </summary>
-    public Dictionary<Point, Dictionary<int, AnalyzedMultiSpawn>> starting = new();
+    public Dictionary<Point, Dictionary<int, List<AnalyzedSpawn>>> starting = new();
 
     /// <summary>
     /// All final spawns
     /// </summary>
-    public Dictionary<int, AnalyzedMultiSpawn> total = new();
+    public Dictionary<int, List<AnalyzedSpawn>> total = new();
 
     public void Clear()
     {
@@ -302,7 +302,7 @@ public class SpawnAnalysisResults
         total.Clear();
     }
 
-    public IEnumerable<AnalyzedMultiSpawn> AllMultiSpawns()
+    public IEnumerable<List<AnalyzedSpawn>> AllMultiSpawns()
     {
         return final.Values.SelectMany(v => v.Values)
             .Concat(starting.Values.SelectMany(v => v.Values))
@@ -313,7 +313,7 @@ public class SpawnAnalysisResults
     {
         foreach (var mspawn in AllMultiSpawns())
         {
-            mspawn.spawns.Sort((a, b) => Math.Sign(b.chance - a.chance));
+            mspawn.Sort((a, b) => Math.Sign(b.chance - a.chance));
         }
     }
 }

@@ -18,7 +18,7 @@ class AnalyzerStackFrame
 
     public int node;
 
-    public List<(AnalyzedSpawns, float)> branches = new();
+    public AnalyzedSpawns branchSpawns = new();
 
     public AnalyzerStackFrame(int node, SimulationNodeTimeline timeline, NodeConnection? incomingConnection)
     {
@@ -61,7 +61,9 @@ public static class SpawnNodeAnalyzer
 
                     branch = frame.timeline.branches[frame.currentBranch];
 
-                    frame.branches.Add((retvalue, branch.info.chance));
+                    retvalue.MultiplyChance(branch.info.chance);
+
+                    frame.branchSpawns.MergeFrom(retvalue);
                     retvalue = null;
                 }
 
@@ -75,7 +77,7 @@ public static class SpawnNodeAnalyzer
                             retvalue.AddSpawn(spawn, frame.incomingConnection.rollInfo);
                     }
 
-                    retvalue = AppendSpawns(retvalue, MergeSpawns(frame.branches));
+                    retvalue.AppendFrom(frame.branchSpawns);
 
                     stack.Pop();
                     break;
@@ -108,85 +110,163 @@ public static class SpawnNodeAnalyzer
 
         return retvalue ?? new();
     }
-
-    static AnalyzedSpawns AppendSpawns(AnalyzedSpawns @base, AnalyzedSpawns append)
-    {
-        foreach (var spawn in append.spawns.Values)
-        {
-            if (!@base.spawns.TryGetValue(spawn.id, out var basespawn))
-            {
-                @base.spawns.Add(spawn.id, spawn);
-                continue;
-            }
-
-            basespawn.AppendFrom(spawn);
-        }
-
-        return @base;
-    }
-
-    static AnalyzedSpawns MergeSpawns(List<(AnalyzedSpawns, float)> branches)
-    {
-        AnalyzedSpawns branchSpawns = new();
-        foreach (var b in branches)
-        {
-            var (branch, chance) = b;
-
-            foreach (AnalyzedMultiPosSpawn spawn in branch.spawns.Values)
-            {
-                spawn.MultiplyChance(chance);
-
-                if (!branchSpawns.spawns.TryGetValue(spawn.id, out AnalyzedMultiPosSpawn? branchSpawn))
-                {
-                    branchSpawns.spawns.Add(spawn.id, spawn);
-                    continue;
-                }
-
-                branchSpawn.MergeFrom(spawn);
-            }
-        }
-
-        return branchSpawns;
-    }
 }
 
 public class AnalyzedSpawns
 {
-    public Dictionary<int, AnalyzedMultiPosSpawn> spawns = new();
+    public Dictionary<int, AnalyzedNPCSpawns> npcSpawns = new();
 
-    //todo: fix multiple dragonflies
     public void AddSpawn(NextSpawn spawn, NodeRollInfo rollInfo)
     {
-        if (!spawns.TryGetValue(spawn.npcId, out AnalyzedMultiPosSpawn? multiposspawn))
+        if (!npcSpawns.TryGetValue(spawn.npcId, out var npcSpawn))
         {
-            multiposspawn = new(spawn.npcId);
-            spawns.Add(spawn.npcId, multiposspawn);
+            npcSpawn = new(spawn.npcId);
+            npcSpawns.Add(spawn.npcId, npcSpawn);
         }
 
-        AnalyzedMultiSpawn? multispawn;
-
-        if (spawn.pos is null)
-        {
-            multiposspawn.noPosSpawns ??= new(spawn.npcId);
-            multispawn = multiposspawn.noPosSpawns;
-        }
-        else
-        {
-            Point pos = spawn.pos.Value;
-            if (!multiposspawn.posSpawns.TryGetValue(pos, out multispawn))
-            {
-                multispawn = new(spawn.npcId);
-                multiposspawn.posSpawns.Add(pos, multispawn);
-            }
-        }
-
-        multispawn.spawns.Add(new()
+        AnalyzedSpawn analyzed = new()
         {
             chance = 1,
+
             leaked = spawn.leakedSpawn,
             affectedByLuck = rollInfo.dependsOnLuck,
-            spawnOnPlayer = spawn.spawnOnPlayer,
-        });
+            spawnOnPlayer = spawn.spawnOnPlayer
+        };
+
+        AnalyzedMultiPosSpawn posspawn = new(spawn.npcId);
+
+        npcSpawn.spawns.Add(posspawn);
+        posspawn.AddSpawn(spawn.pos, analyzed);
+    }
+
+    public void MultiplyChance(float mul)
+    {
+        foreach (var npcSpawn in npcSpawns.Values)
+            npcSpawn.MultiplyChance(mul);
+    }
+
+    public void AppendFrom(AnalyzedSpawns aspawns)
+    {
+        foreach (var (id, spawns) in aspawns.npcSpawns)
+        {
+            if (!npcSpawns.TryGetValue(id, out var thisSpawns))
+            {
+                npcSpawns.Add(id, spawns);
+                continue;
+            }
+
+            thisSpawns.AppendFrom(spawns);
+        }
+    }
+
+    public void MergeFrom(AnalyzedSpawns aspawns)
+    {
+        foreach (var (id, spawns) in aspawns.npcSpawns)
+        {
+            if (!npcSpawns.TryGetValue(id, out var thisSpawns))
+            {
+                npcSpawns.Add(id, spawns);
+                continue;
+            }
+
+            thisSpawns.MergeFrom(spawns);
+        }
+    }
+}
+
+public class AnalyzedNPCSpawns
+{
+    public int id;
+    public List<AnalyzedMultiPosSpawn> spawns = new();
+
+    public AnalyzedNPCSpawns(int id)
+    {
+        this.id = id;
+    }
+
+    public void MultiplyChance(float mul)
+    {
+        foreach (var spawn in spawns)
+            spawn.MultiplyChance(mul);
+    }
+
+    public void AppendFrom(AnalyzedNPCSpawns spawns)
+    {
+        this.spawns.AddRange(spawns.spawns);
+    }
+
+    public void MergeFrom(AnalyzedNPCSpawns spawns)
+    {
+        HashSet<int> usedSpawnIndexes = new();
+
+        List<AnalyzedMultiPosSpawn> unmatchedSpawns = new();
+
+        AnalyzedMultiPosSpawn thisSpawn;
+
+        foreach (var newSpawn in spawns.spawns)
+        {
+            int mostMatchedPos = -1;
+            int mostMatchedPosMatchCount = -1;
+
+            for (int i = 0; i < this.spawns.Count; i++)
+            {
+                if (usedSpawnIndexes.Contains(i))
+                    continue;
+
+                thisSpawn = this.spawns[i];
+
+                int matchedPositions = 0;
+
+                foreach (Point? pos in newSpawn.IterPositions())
+                    if (thisSpawn.HasPosition(pos))
+                        matchedPositions++;
+
+                if (matchedPositions > 0 && matchedPositions > mostMatchedPosMatchCount)
+                {
+                    mostMatchedPos = i;
+                    mostMatchedPosMatchCount = matchedPositions;
+                }
+            }
+
+            if (mostMatchedPos < 0)
+            {
+                unmatchedSpawns.Add(newSpawn);
+                continue;
+            }
+
+            usedSpawnIndexes.Add(mostMatchedPos);
+
+            thisSpawn = this.spawns[mostMatchedPos];
+
+            thisSpawn.MergeFrom(newSpawn);
+        }
+
+        foreach (var newSpawn in unmatchedSpawns)
+        {
+            bool merged = false;
+            for (int i = 0; i < this.spawns.Count; i++)
+            {
+                if (usedSpawnIndexes.Contains(i))
+                    continue;
+
+                this.spawns[i].MergeFrom(newSpawn);
+                usedSpawnIndexes.Add(i);
+                merged = true;
+                break;
+            }
+
+            if (merged)
+                continue;
+
+            usedSpawnIndexes.Add(this.spawns.Count);
+            this.spawns.Add(newSpawn);
+        }
+    }
+
+    public void ConvertToTilePos()
+    {
+        foreach (var spawn in spawns)
+            spawn.ConvertToTilePos();
     }
 }
 
@@ -194,76 +274,128 @@ public class AnalyzedMultiPosSpawn
 {
     public int id;
 
-    public Dictionary<Point, AnalyzedMultiSpawn> posSpawns = new();
+    public Dictionary<Point, AnalyzedSpawn> posSpawns = new();
 
-    public AnalyzedMultiSpawn? noPosSpawns = null;
+    public AnalyzedSpawn? noPosSpawn = null;
 
     public AnalyzedMultiPosSpawn(int id)
     {
         this.id = id;
     }
 
-    public void AppendFrom(AnalyzedMultiPosSpawn spawn)
+    public bool HasPosition(Point? pos)
     {
-        foreach (var kvp in spawn.posSpawns)
+        if (pos is null)
         {
-            if (!posSpawns.TryGetValue(kvp.Key, out var thisSpawns))
-            {
-                posSpawns.Add(kvp.Key, kvp.Value);
-                continue;
-            }
-
-            thisSpawns.AppendFrom(kvp.Value);
+            return noPosSpawn is not null;
         }
-
-        if (spawn.noPosSpawns is not null)
+        else
         {
-            if (noPosSpawns is null)
+            return posSpawns.ContainsKey(pos.Value);
+        }
+    }
+
+    public AnalyzedSpawn? GetPosition(Point? pos)
+    {
+        if (pos is null)
+        {
+            return noPosSpawn;
+        }
+        else
+        {
+            if (posSpawns.TryGetValue(pos.Value, out var posSpawn))
             {
-                noPosSpawns = spawn.noPosSpawns;
+                return posSpawn;
+            }
+            return null;
+        }
+    }
+
+    public IEnumerable<Point?> IterPositions()
+    {
+        foreach (Point pos in posSpawns.Keys)
+            yield return pos;
+
+        if (noPosSpawn is not null)
+            yield return null;
+
+        yield break;
+    }
+
+    public IEnumerable<AnalyzedSpawn> IterSpawns()
+    {
+        foreach (var spawn in posSpawns.Values)
+            yield return spawn;
+
+        if (noPosSpawn is not null)
+            yield return noPosSpawn;
+
+        yield break;
+    }
+
+    public IEnumerable<(Point?, AnalyzedSpawn)> Iter()
+    {
+        foreach (var (pos, spawn) in posSpawns)
+            yield return (pos, spawn);
+
+        if (noPosSpawn is not null)
+            yield return (null, noPosSpawn);
+
+        yield break;
+    }
+
+    public void AddSpawn(Point? pos, AnalyzedSpawn spawn)
+    {
+        if (pos is null)
+        {
+            if (noPosSpawn is not null)
+                noPosSpawn.MergeFrom(spawn);
+            else
+                noPosSpawn = spawn;
+        }
+        else
+        {
+            if (posSpawns.TryGetValue(pos.Value, out var posSpawn))
+            {
+                posSpawn.MergeFrom(spawn);
             }
             else
             {
-                noPosSpawns.AppendFrom(spawn.noPosSpawns);
+                posSpawns.Add(pos.Value, spawn);
             }
         }
     }
 
-    public void MergeFrom(AnalyzedMultiPosSpawn spawn)
+    public void MergeFrom(AnalyzedMultiPosSpawn spawns)
     {
-        foreach (var kvp in spawn.posSpawns)
+        foreach (var (pos, spawn) in spawns.posSpawns)
         {
-            if (!posSpawns.TryGetValue(kvp.Key, out var thisSpawns))
+            if (posSpawns.TryGetValue(pos, out var posSpawn))
             {
-                posSpawns.Add(kvp.Key, kvp.Value);
-                continue;
-            }
-
-            thisSpawns.MergeFrom(kvp.Value, false);
-        }
-
-        if (spawn.noPosSpawns is not null)
-        {
-            if (noPosSpawns is null)
-            {
-                noPosSpawns = spawn.noPosSpawns;
+                posSpawn.MergeFrom(spawn);
             }
             else
             {
-                noPosSpawns.MergeFrom(spawn.noPosSpawns, false);
+                posSpawns.Add(pos, spawn);
             }
+        }
+
+        if (spawns.noPosSpawn is not null)
+        {
+            if (noPosSpawn is not null)
+                noPosSpawn.MergeFrom(spawns.noPosSpawn);
+            else
+                noPosSpawn = spawns.noPosSpawn;
         }
     }
 
     public void MultiplyChance(float mul)
     {
-        foreach (var spawnPos in posSpawns.Values)
-            foreach (var spawn in spawnPos.spawns)
-                spawn.chance *= mul;
+        foreach (var spawn in posSpawns.Values)
+            spawn.chance *= mul;
 
-        if (noPosSpawns is not null)
-            foreach (var spawn in noPosSpawns.spawns)
-                spawn.chance *= mul;
+        if (noPosSpawn is not null)
+            noPosSpawn.chance *= mul;
     }
 
     public void ConvertToTilePos()
@@ -271,66 +403,26 @@ public class AnalyzedMultiPosSpawn
         var oldSpawns = posSpawns;
         posSpawns = new();
 
-        foreach (var kvp in oldSpawns)
-        {
-            Point pos = new(kvp.Key.X / 16, kvp.Key.Y / 16);
+        foreach (var (pos, oldSpawn) in oldSpawns) {
+            Point tilePos = new(pos.X / 16, pos.Y / 16);
 
-            if (!posSpawns.TryGetValue(pos, out var thisSpawns))
-            {
-                posSpawns.Add(pos, kvp.Value);
-                continue;
+            if (posSpawns.TryGetValue(tilePos, out var spawn)) {
+                spawn.MergeFrom(oldSpawn);
             }
-
-            thisSpawns.MergeFrom(kvp.Value, false);
+            else {
+                posSpawns.Add(tilePos, oldSpawn);
+            }
         }
     }
 
-    public IEnumerable<(Point?, AnalyzedMultiSpawn)> IterAllSpawns() {
-        var iter = posSpawns.Select(kvp => (new Point?(kvp.Key), kvp.Value));
+    public AnalyzedSpawn AllPositionsSpawn() {
+        AnalyzedSpawn spawn = new();
 
-        if (noPosSpawns is not null)
-            iter = iter.Append((null, noPosSpawns));
-
-        return iter;
-    }
-}
-
-public class AnalyzedMultiSpawn
-{
-    public int id;
-    public List<AnalyzedSpawn> spawns = new();
-
-    public AnalyzedMultiSpawn(int id)
-    {
-        this.id = id;
-    }
-
-    public void AppendFrom(AnalyzedMultiSpawn spawn)
-    {
-        spawns.AddRange(spawn.spawns);
-    }
-
-    public void MergeFrom(AnalyzedMultiSpawn spawn, bool keepOriginal)
-    {
-        for (int i = 0; i < spawn.spawns.Count; i++)
-        {
-            if (spawns.Count <= i)
-            {
-                AnalyzedSpawn s = spawn.spawns[i];
-                if (keepOriginal)
-                    s = s.Clone();
-
-                spawns.Add(s);
-            }
-            else
-                spawns[i].MergeFrom(spawn.spawns[i]);
+        foreach (var s in IterSpawns()) {
+            spawn.MergeFrom(s);
         }
-    }
 
-    public void MultiplyChance(float mul)
-    {
-        foreach (var spawn in spawns)
-            spawn.chance *= mul;
+        return spawn;
     }
 }
 
