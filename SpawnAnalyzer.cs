@@ -43,6 +43,8 @@ namespace SpawnAnalyzer;
 // TODO: track extra spawn params (ai params)
 // TODO: generic rewriter/simulator, simulate slime item, simulate spawner setup methods for valid combinations of states 
 
+// TODO: pick luck in the ui, chance at lowest luck, chance at highest luck
+
 public class SpawnAnalyzer
 {
     public static SpawnAnalysis? LastAnalysis { get; private set; }
@@ -57,7 +59,7 @@ public class SpawnAnalyzer
     internal static Hook? NPCSpawnerSpawnNPCHook;
     internal static Hook? NPCNewNPCHook;
 
-    internal static ILHook? UnifiedRandomInternalSample;
+    internal static ILHook? UnifiedRandomInternalSampleHook;
 
     static Dictionary<string, Texture2D> TextureCache = new();
 
@@ -77,7 +79,7 @@ public class SpawnAnalyzer
         ]), On_NPC_Spawner_SpawnNPC);
 
         NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
-        UnifiedRandomInternalSample = new ILHook(Utils.GetMethodOrThrow<UnifiedRandom>("InternalSample"), IL_UnifiedRandom_InternalSample);
+        UnifiedRandomInternalSampleHook = new ILHook(Utils.GetMethodOrThrow<UnifiedRandom>("InternalSample"), IL_UnifiedRandom_InternalSample);
 
         ImplInitThread = new Thread(() =>
         {

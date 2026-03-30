@@ -17,11 +17,13 @@
 
   <PropertyGroup Condition="'$(TerrariaFlavor)' == 'vanillaWindows'">
     <TargetFramework>net48</TargetFramework>
+    <DefineConstants>$(DefineConstants);NETFRAMEWORK</DefineConstants>
     <TerrariaExecutable>Terraria.exe</TerrariaExecutable>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TerrariaFlavor)' == 'vanillaNonWindows'">
     <TargetFramework>net48</TargetFramework>
+    <DefineConstants>$(DefineConstants);NETFRAMEWORK</DefineConstants>
     <TerrariaExecutable>Terraria.exe</TerrariaExecutable>
     <FNAPath>$(TerrariaPath)/FNA.dll</FNAPath>
   </PropertyGroup>

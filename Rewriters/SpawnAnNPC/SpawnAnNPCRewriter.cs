@@ -355,7 +355,7 @@ public class SpawnAnNPCRewriter
             Instruction instr = c.Next!;
             InstructionStackInfo stackinfo = stack.LookupInstruction(instr, out _)!;
 
-            StackValue targetValue = stackinfo.inValues[^6];
+            StackValue targetValue = stackinfo.inValues[stackinfo.inValues.Count - 6];
 
             if (targetValue.producedBy.Count != 1) {
                 // todo: warnings
@@ -547,7 +547,7 @@ public class SpawnAnNPCRewriter
                 InstructionStackInfo? info = stack.LookupInstruction(c.Next, out _);
                 if (info is not null)
                 {
-                    StackValue valref = info.inValues[^2];
+                    StackValue valref = info.inValues[info.inValues.Count - 2];
                     if (valref.producedBy.All(p => p.OpCode == OpCodes.Ldloca || p.OpCode == OpCodes.Ldloca_S))
                     {
                         continue;

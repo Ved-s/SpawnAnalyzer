@@ -23,7 +23,7 @@ public class UIButton : UIElement, ISelectable
 	private readonly Asset<Texture2D> borderTexture;
 	private readonly Asset<Texture2D> backgroundTexture;
 
-	private List<PositionedSnippet> text;
+	private List<PositionedSnippet> text = null!;
 	private Vector2 textSize;
 
 	private string textString;
@@ -74,7 +74,6 @@ public class UIButton : UIElement, ISelectable
 		UpdateText();
 	}
 
-	[MemberNotNull(nameof(text))]
 	void UpdateText()
 	{
 		List<TextSnippet> snippets = ChatManager.ParseMessage(textString, textColor);
