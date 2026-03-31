@@ -8,9 +8,11 @@ using System.Runtime.Serialization;
 using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using MonoMod.Utils;
 using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using SpawnAnalyzer.Simulation;
 using SpawnAnalyzer.UI;
@@ -61,6 +63,8 @@ public class SpawnAnalyzer
 
     internal static ILHook? UnifiedRandomInternalSampleHook;
 
+    internal static Hook[]? MonoModDynamicMethodsNREHooks;
+
     static Dictionary<string, Texture2D> TextureCache = new();
 
     static int DebugCountdown = -1;
@@ -81,6 +85,8 @@ public class SpawnAnalyzer
         NPCNewNPCHook = new Hook(Utils.GetMethodOrThrow<NPC>("NewNPC"), On_NPC_NewNPC);
         UnifiedRandomInternalSampleHook = new ILHook(Utils.GetMethodOrThrow<UnifiedRandom>("InternalSample"), IL_UnifiedRandom_InternalSample);
 
+        HackMonoModDynamicMethodNRE();
+
         ImplInitThread = new Thread(() =>
         {
             Stopwatch sw = Stopwatch.StartNew();
@@ -92,6 +98,55 @@ public class SpawnAnalyzer
 
         if (Program.LaunchParameters.ContainsKey("-spawnanalyzerdebug"))
             DebugCountdown = 10;
+    }
+
+    static void HackMonoModDynamicMethodNRE() {
+
+        var dynamicMethod = new System.Reflection.Emit.DynamicMethod("method", typeof(void), [], true);
+
+        var dmd = new DynamicMethodDefinition("", null, []);
+        var il = dmd.GetILProcessor();
+
+        var re = il.Import(dynamicMethod);
+
+        List<Hook> hooks = new();
+
+        try {
+            re.Is("a", "a");
+        } catch (NullReferenceException) {
+            hooks.Add(
+                new Hook(
+                    Utils.GetMethodOrThrow(typeof(MonoMod.Utils.Extensions), "Is", [typeof(MethodReference), typeof(string), typeof(string)]),
+                    (Func<MethodReference, string, string, bool> orig, MethodReference method, string typeFullName, string name) => {
+                        if (method is DynamicMethodReference)
+                            return false;
+
+                        return orig(method, typeFullName, name);
+                    }
+                )
+            );
+        }
+
+        try {
+            re.Is(typeof(int), "a");
+        } catch (NullReferenceException) {
+            hooks.Add(
+                new Hook(
+                    Utils.GetMethodOrThrow(typeof(MonoMod.Utils.Extensions), "Is", [typeof(MethodReference), typeof(Type), typeof(string)]),
+                    (Func<MethodReference, Type, string, bool> orig, MethodReference method, Type type, string name) => {
+                        if (method is DynamicMethodReference)
+                            return false;
+
+                        return orig(method, type, name);
+                    }
+                )
+            );
+        }
+
+        if (hooks.Count == 0)
+            return;
+
+        MonoModDynamicMethodsNREHooks = hooks.ToArray();
     }
 
     public static SimulatorImpl? GetDefaultImplBlocking()

@@ -405,6 +405,10 @@ public class StackAnalyzer
                     {
                         value = new(null, valueType, SimpleTypeFromSystemType(valueType));
                     }
+                    else if (instr.MatchLdlen())
+                    {
+                        value = new(null, typeof(nint), SimpleType.NativeInteger);
+                    }
                     else
                     {
                         throw new NotSupportedException($"Unsupported StackBehaviourPush {opCode.StackBehaviourPush} of opcode {opCode}");
@@ -780,6 +784,7 @@ public class InstructionStackInfo
 
 public enum SimpleType
 {
+    NativeInteger,
     Integer,
     Long,
     Float,

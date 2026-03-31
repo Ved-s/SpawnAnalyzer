@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -152,18 +153,6 @@ public class SpawnAnNPCRewriter
         VariableDefinition tempIntVar = new(il.Import(typeof(int)));
         VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
 
-        ReplaceGetZombieSetings(il);
-        RemoveDefaultTargetSet(il);
-
-        InlineCalls(il);
-        il.Instrs.FillWithFakeILOffsets();
-
-        StackAnalysis stack = StackAnalyzer.Analyze(il);
-
-
-        ILLabel mainEntryLabel = il.DefineLabel();
-        List<ILLabel> entryJumps = [];
-
         HashSet<FieldInfo> allowFields = new();
         HashSet<MethodBase> allowMethods = [
             Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.NodeHit)),
@@ -183,6 +172,18 @@ public class SpawnAnNPCRewriter
 
             typeof(Rectangle).GetConstructor([typeof(int), typeof(int), typeof(int), typeof(int)])!,
         ];
+
+        ReplaceGetZombieSetings(il);
+        RemoveDefaultTargetSet(il);
+        PatchFindNearbyBook(il, allowMethods);
+
+        InlineCalls(il);
+        il.Instrs.FillWithFakeILOffsets();
+
+        StackAnalysis stack = StackAnalyzer.Analyze(il);
+
+        ILLabel mainEntryLabel = il.DefineLabel();
+        List<ILLabel> entryJumps = [];
 
         NodeRewriter nodeRewriter = new(
             nodes, contextParam,
@@ -357,7 +358,8 @@ public class SpawnAnNPCRewriter
 
             StackValue targetValue = stackinfo.inValues[stackinfo.inValues.Count - 6];
 
-            if (targetValue.producedBy.Count != 1) {
+            if (targetValue.producedBy.Count != 1)
+            {
                 // todo: warnings
                 Console.WriteLine($"Unsupported target value producers for NPC.SpawnOnPlayer at IL_{instr.Offset:x4}");
                 continue;
@@ -365,7 +367,8 @@ public class SpawnAnNPCRewriter
 
             Instruction targetProducer = targetValue.producedBy[0];
 
-            if (!targetProducer.MatchLdarg(5)) {
+            if (!targetProducer.MatchLdarg(5))
+            {
                 Console.WriteLine($"Unsupported target value producer for NPC.SpawnOnPlayer at IL_{instr.Offset:x4}");
                 continue;
             }
@@ -910,6 +913,216 @@ public class SpawnAnNPCRewriter
         {
             c.RemoveRange(3);
         }
+    }
+
+    static void PatchFindNearbyBook(ILContext il, HashSet<MethodBase> allowMethods)
+    {
+        MethodInfo helper;
+        try
+        {
+            helper = RewriteFindNearbyBook();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"PatchFindNearbyBook: could not generate helper, {e}");
+            return;
+        }
+
+        allowMethods.Add(helper);
+        allowMethods.Add(Utils.GetMethodOrThrow<FindNearbyBookReturnValue>(nameof(FindNearbyBookReturnValue.GetPoint)));
+
+        ILCursor c = new(il);
+
+        /*
+            |||/     ldloca.s  bookPosition
+            ||||/    (push)
+            |||||/   (push)
+            >\\\\\  -call      bool Terraria.NPC::AI_FindNearbyBook(Point, int32, int32, Point&, bool, bool)
+
+            >\\\\\  +call      FindNearbyBookReturnValue FindNearbyBookHelper(Point, int32, int32, Point&, bool, bool)
+            |      
+            |       // If not found, bail
+            >\      +dup
+            |>      +ldfld      FindNearbyBookReturnValue::found
+            |\      +brfalse    endWithLoad
+            |
+            |       // If points are null, exit early
+            >\      +dup
+            |>      +ldfld      FindNearbyBookReturnValue::points
+            |\      +brfalse    endWithLoad
+            |
+            |       // Choose a random point
+            >\      +dup
+            |>      +ldfld      FindNearbyBookReturnValue::points
+            |>      +ldlen
+            |>      +conv.i4
+            ||
+            ||      // Fake random call will be replaced
+            |>      +call       int32 NodeRewriter::FakeRandomNext(int32)
+            |>      +call       int32 NodeRewriter::AllUniqueValueHandlerMarker(int32)
+            ||/     +ldloca.s   bookPosition
+            \\\     +call       FindNearbyBookReturnValue::GetPoint(FindNearbyBookReturnValue, int32, Point&)
+            >       +ldc.i4.1
+            |       +br         end
+    
+            |   endWithLoad:
+            >       +ldfld      FindNearbyBookReturnValue::found
+            |   end:
+        \*/
+
+        while (c.TryGotoNext(
+            MoveType.AfterLabel,
+            x => x.MatchCall<NPC>("AI_FindNearbyBook")
+        ))
+        {
+            if (!c.Previous.Previous.Previous.MatchLdloca(out int bookPosition))
+            {
+                Console.WriteLine($"PatchFindNearbyBook: weird bookPosition ref load for AI_FindNearbyBook at IL_{c.Next!.Offset:x4}");
+                continue;
+            }
+
+            ILLabel endWithLoad = c.DefineLabel();
+            ILLabel end = c.DefineLabel();
+
+            c.Remove();
+            c.Emit(OpCodes.Call, helper);
+
+            c.Emit(OpCodes.Dup);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Ldfld, nameof(FindNearbyBookReturnValue.found));
+            c.Emit(OpCodes.Brfalse, endWithLoad);
+
+            c.Emit(OpCodes.Dup);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Ldfld, nameof(FindNearbyBookReturnValue.points));
+            c.Emit(OpCodes.Brfalse, endWithLoad);
+
+            c.Emit(OpCodes.Dup);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Ldfld, nameof(FindNearbyBookReturnValue.points));
+            c.Emit(OpCodes.Ldlen);
+            c.Emit(OpCodes.Conv_I4);
+
+            c.Emit<NodeRewriter>(OpCodes.Call, nameof(NodeRewriter.FakeRandomNext));
+            c.Emit<NodeRewriter>(OpCodes.Call, nameof(NodeRewriter.AllUniqueValueHandlerMarker));
+            c.Emit(OpCodes.Ldloca, bookPosition);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Call, nameof(FindNearbyBookReturnValue.GetPoint));
+            c.Emit(OpCodes.Ldc_I4_1);
+            c.Emit(OpCodes.Br, end);
+
+            c.MarkLabel(endWithLoad);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Ldfld, nameof(FindNearbyBookReturnValue.found));
+
+            c.MarkLabel(end);
+        }   
+    }
+
+    public class FindNearbyBookReturnValue
+    {
+        public bool found;
+        public Point[]? points;
+
+        public void GetPoint(int index, out Point val)
+        {
+            val = points![index];
+        }
+
+        public static FindNearbyBookReturnValue Create(bool retvalue, bool closestBook, Point[] points, int pointsLen)
+        {
+            FindNearbyBookReturnValue ret = new()
+            {
+                found = retvalue,
+                points = null,
+            };
+            if (closestBook)
+                return ret;
+
+            Point[] newPoints = new Point[pointsLen];
+            Array.Copy(points, newPoints, pointsLen);
+
+            ret.points = newPoints;
+            return ret;
+        }
+    }
+
+    public delegate FindNearbyBookReturnValue FindNearbyBookHelperDelegate(
+        Point searchPosition, int searchWidth, int searchHeight,
+        out Point bookPosition, bool closestBook, bool checkPlayerScreenRanges
+    );
+
+    static MethodInfo RewriteFindNearbyBook()
+    {
+        DynamicMethodDefinition dmd = new(Utils.GetMethodOrThrow<NPC>("AI_FindNearbyBook"));
+
+        dmd.Definition.ReturnType = dmd.Module.ImportReference(typeof(FindNearbyBookReturnValue));
+
+        ParameterDefinition closestBook = dmd.Definition.Parameters[4];
+
+        ILContext il = new(dmd.Definition);
+
+        il.Invoke(il =>
+        {
+            ILCursor c = new(il);
+
+            int nearbyBooks = 0;
+            int nearbyBooksLength = 0;
+
+            /*
+                -ldarg.3
+	            -ldloc     nearbyBooks
+	            -ldsfld    class Terraria.Utilities.UnifiedRandom Terraria.Main::rand
+	            -ldloc     nearbyBooksLength
+	            -callvirt  instance int32 Terraria.Utilities.UnifiedRandom::Next(int32)
+	            -ldelem    [FNA]Microsoft.Xna.Framework.Point
+	            -stobj     [FNA]Microsoft.Xna.Framework.Point
+            */
+
+            if (!c.TryGotoNext(
+                MoveType.AfterLabel,
+                x => x.MatchLdarg(3),
+                x => x.MatchLdloc(out nearbyBooks),
+                x => x.MatchLdsfld<Main>("rand"),
+                x => x.MatchLdloc(out nearbyBooksLength),
+                x => x.MatchCallvirt<UnifiedRandom>("Next"),
+                x => x.MatchLdelemAny(out _),
+                x => x.MatchStobj(out _)
+            ))
+            {
+                throw new Exception("RewriteFindNearbyBook: failed to match random call");
+            }
+
+            c.RemoveRange(7);
+
+            ILLabel retHandler = c.DefineLabel();
+            foreach (Instruction instr in c.Instrs)
+            {
+                if (instr.OpCode == OpCodes.Ret)
+                {
+                    instr.OpCode = OpCodes.Br;
+                    instr.Operand = retHandler;
+                }
+            }
+
+            Instruction ret = c.IL.Create(OpCodes.Ret);
+            c.Instrs.Add(ret);
+
+            c.Goto(ret);
+
+            /*
+                retHandler:
+                    ldarg      closestBook
+                    ldloc      nearbyBooks
+                    ldloc      nearbyBooksLength
+                    call       FindNearbyBookReturnValue FindNearbyBookReturnValue::Create(bool, bool, Point[], int32)
+            */
+
+            c.MarkLabel(retHandler);
+            c.Emit(OpCodes.Ldarg, closestBook);
+            c.Emit(OpCodes.Ldloc, nearbyBooks);
+            c.Emit(OpCodes.Ldloc, nearbyBooksLength);
+            c.Emit<FindNearbyBookReturnValue>(OpCodes.Call, nameof(FindNearbyBookReturnValue.Create));
+        });
+
+        DMDHack.SetNullOriginalMethod(dmd);
+
+        return dmd.Generate().CreateDelegate<FindNearbyBookHelperDelegate>().Method;
     }
 }
 

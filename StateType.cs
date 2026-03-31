@@ -4,6 +4,8 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Serialization;
+using Microsoft.Xna.Framework;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using Terraria;
 
 namespace SpawnAnalyzer;
@@ -18,20 +20,26 @@ public class StateType
 
     static readonly ModuleBuilder TypeModule = TypeAssembly.DefineDynamicModule("Types");
 
-    static readonly Dictionary<Type, MethodInfo> EqMethods = new()
+    public static readonly Dictionary<Type, MethodInfo> EqMethods = new()
     {
         {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListEq))},
         {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DEq))},
         {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DEq))},
         {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileEq))},
+        {typeof(Point[]),   Utils.GetMethodOrThrow<StateType>(nameof(PointArrayEq))},
+
+        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<StateType>(nameof(FindNearbyBookReturnValueEq))},
     };
 
-    static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
+    public static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
     {
         {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListClone))},
         {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DClone))},
         {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DClone))},
         {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileClone))},
+        {typeof(Point[]),   Utils.GetMethodOrThrow<StateType>(nameof(PointArrayClone))},
+
+        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<StateType>(nameof(FindNearbyBookReturnValueClone))},
     };
 
     public Type Type;
@@ -67,6 +75,14 @@ public class StateType
         return new StateType(type, eq, clone);
     }
 
+    public static void GenerateMethodsFor(Type type) {
+        var eq = GenerateEqMethod(type);
+        var clone = GenerateCloneMethod(type);
+
+        EqMethods[type] = eq.Method;
+        CloneMethods[type] = clone.Method;
+    }
+
     public static Func<object, object, bool> GenerateEqMethod(Type type)
     {
         ParameterExpression param1 = Expression.Parameter(typeof(object));
@@ -93,7 +109,7 @@ public class StateType
         {
             if (field.IsStatic)
                 continue;
-                
+
             Expression neq;
 
             if (EqMethods.TryGetValue(field.FieldType, out MethodInfo? eqMethod))
@@ -322,7 +338,7 @@ public class StateType
         {
             return null;
         }
-        
+
         int l0 = a.GetLength(0);
         int l1 = a.GetLength(1);
 
@@ -337,28 +353,94 @@ public class StateType
         return clone;
     }
 
-    static bool TileEq(Tile? a, Tile? b) {
+    static bool TileEq(Tile? a, Tile? b)
+    {
         if (ReferenceEquals(a, b))
             return true;
-        
+
         if (a is null || b is null)
             return false;
 
         return a.type == b.type &&
-		    a.wall == b.wall &&
-		    a.liquid == b.liquid &&
-		    a.sTileHeader == b.sTileHeader &&
-		    a.bTileHeader == b.bTileHeader &&
-		    a.bTileHeader2 == b.bTileHeader2 &&
-		    a.bTileHeader3 == b.bTileHeader3 &&
-		    a.frameX == b.frameX &&
-		    a.frameY == b.frameY;
+            a.wall == b.wall &&
+            a.liquid == b.liquid &&
+            a.sTileHeader == b.sTileHeader &&
+            a.bTileHeader == b.bTileHeader &&
+            a.bTileHeader2 == b.bTileHeader2 &&
+            a.bTileHeader3 == b.bTileHeader3 &&
+            a.frameX == b.frameX &&
+            a.frameY == b.frameY;
     }
 
-    static Tile? TileClone(Tile? a) {
+    static Tile? TileClone(Tile? a)
+    {
         if (a is null)
             return null;
 
         return new Tile(a);
+    }
+
+    static bool PointArrayEq(Point[]? a, Point[]? b)
+    {
+        if (a is null != b is null)
+        {
+            return false;
+        }
+        if (a is null || b is null)
+        {
+            return true;
+        }
+
+        if (a.Length != b.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static Point[]? PointArrayClone(Point[]? a)
+    {
+        if (a is null)
+        {
+            return null;
+        }
+
+        Point[] clone = new Point[a.Length];
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            clone[i] = a[i];
+        }
+
+        return clone;
+    }
+
+    static bool FindNearbyBookReturnValueEq(SpawnAnNPCRewriter.FindNearbyBookReturnValue? a, SpawnAnNPCRewriter.FindNearbyBookReturnValue? b) {
+        if (ReferenceEquals(a, b))
+            return true;
+
+        if (a is null || b is null)
+            return false;
+
+        return a.found == b.found && PointArrayEq(a.points, b.points);
+    }
+
+    static SpawnAnNPCRewriter.FindNearbyBookReturnValue? FindNearbyBookReturnValueClone(SpawnAnNPCRewriter.FindNearbyBookReturnValue? a) {
+        if (a is null)
+            return null;
+
+        return new() {
+            found = a.found,
+            points = PointArrayClone(a.points)
+        };
     }
 }

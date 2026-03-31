@@ -104,6 +104,7 @@ class NodeRewriter
             x => x.MatchCallOrCallvirt<UnifiedRandom>("Next")
               || x.MatchCall("Terraria.Utils", "SelectRandom")
               || x.MatchCallOrCallvirt(out MethodReference? mr) && mr.Name.StartsWith("Roll")
+              || x.MatchCall<NodeRewriter>(nameof(FakeRandomNext))
         ))
         {
             Instruction instr = c.Next!;
@@ -549,6 +550,16 @@ class NodeRewriter
             c.Goto(target.Target);
             return TryCreateValueHandler(c, value, allowUnknownPatterns);
         }
+        else if (ins.MatchCall<NodeRewriter>(nameof(AllUniqueValueHandlerMarker)))
+        {
+            c.Remove();
+            return new(ValueHandlerType.AllUnique);
+        }
+        else if (value.consumedBy.Count == 1 && value.consumedBy[0].MatchCall<NodeRewriter>(nameof(AllUniqueValueHandlerMarker)))
+        {
+            c.Instrs.Remove(value.consumedBy[0]);
+            return new(ValueHandlerType.AllUnique);
+        }
 
         /*
             call      int32 Terraria.NPC::CountNPCS(int32)
@@ -604,7 +615,7 @@ class NodeRewriter
 
     private SimulationNodeImpl? TryBuildSingleIntSimulationNode(MethodReference method, ParamProvider<int> param, ValueHandler valHandler)
     {
-        if (method.Name == "Next")
+        if (method.Name == "Next" || method.Name == nameof(FakeRandomNext))
         {
             return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.None);
         }
@@ -708,6 +719,13 @@ class NodeRewriter
 
         return dmd;
     }
+
+    public static int FakeRandomNext(int max)
+    {
+        throw new InvalidOperationException("Called placeholder function");
+    }
+
+    public static int AllUniqueValueHandlerMarker(int v) => v;
 }
 
 enum StackValuePreserveType
@@ -918,8 +936,10 @@ class OneParamRandomNextNode : SimulationNodeImpl
                 float? tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
 
                 Action<SpawnSimulationContext>? onHitLuckyBranch = null;
-                if (dependsOnLuck) {
-                    onHitLuckyBranch = (SpawnSimulationContext ctx) => {
+                if (dependsOnLuck)
+                {
+                    onHitLuckyBranch = (SpawnSimulationContext ctx) =>
+                    {
                         ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
                     };
                 }
@@ -955,8 +975,10 @@ class OneParamRandomNextNode : SimulationNodeImpl
 
                 tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
                 onHitLuckyBranch = null;
-                if (dependsOnLuck) {
-                    onHitLuckyBranch = (SpawnSimulationContext ctx) => {
+                if (dependsOnLuck)
+                {
+                    onHitLuckyBranch = (SpawnSimulationContext ctx) =>
+                    {
                         ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
                     };
                 }
