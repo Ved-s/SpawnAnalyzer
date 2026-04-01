@@ -11,6 +11,7 @@ using MonoMod.Cil;
 using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
 using Terraria;
+using Terraria.ID;
 using Terraria.Utilities;
 
 using OpCode = Mono.Cecil.Cil.OpCode;
@@ -176,6 +177,7 @@ public class SpawnAnNPCRewriter
         ReplaceGetZombieSetings(il);
         RemoveDefaultTargetSet(il);
         PatchFindNearbyBook(il, allowMethods);
+        PatchSlimes(il);
 
         InlineCalls(il);
         il.Instrs.FillWithFakeILOffsets();
@@ -1011,7 +1013,7 @@ public class SpawnAnNPCRewriter
             c.Emit<FindNearbyBookReturnValue>(OpCodes.Ldfld, nameof(FindNearbyBookReturnValue.found));
 
             c.MarkLabel(end);
-        }   
+        }
     }
 
     public class FindNearbyBookReturnValue
@@ -1123,6 +1125,275 @@ public class SpawnAnNPCRewriter
         DMDHack.SetNullOriginalMethod(dmd);
 
         return dmd.Generate().CreateDelegate<FindNearbyBookHelperDelegate>().Method;
+    }
+
+    class ILLabelTemplate
+    {
+        public int targetIndex;
+
+        public ILLabelTemplate(int targetIndex)
+        {
+            this.targetIndex = targetIndex;
+        }
+    }
+
+    static void PatchSlimes(ILContext il)
+    {
+        DynamicMethodDefinition spawnNPC = new(Utils.GetMethodOrThrow<NPC.Spawner>("SpawnNPC", [
+            /*                [0] this   */
+            typeof(int),   /* [1] X      */ 
+            typeof(int),   /* [2] Y      */ 
+            typeof(int),   /* [3] Type   */ 
+            typeof(int),   /* [4] Start  */ 
+            typeof(float), /* [5] ai0    */   
+            typeof(float), /* [6] ai1    */   
+            typeof(float), /* [7] ai2    */   
+            typeof(float), /* [8] ai3    */   
+            typeof(int),   /* [9] Target */ 
+        ]));
+
+        ILContext sil = new(spawnNPC.Definition);
+        ILCursor sc = new(sil);
+
+        Instruction slimeCodeEndInstruction = null!;
+
+        /*
+        [0] ldarg.3
+	    [1] call      int32 Terraria.ID.NPCID::FromNetId(int32)
+	    [2] ldc.i4.1
+	    [3] bne.un.s  slimeCodeEnd
+        */
+
+        if (!sc.TryGotoNext(
+            x => x.MatchLdarg(3),
+            x => x.MatchCall(typeof(NPCID), "FromNetId"),
+            x => x.MatchLdcI4(1),
+            x =>
+            {
+                bool b = x.OpCode == OpCodes.Bne_Un || x.OpCode == OpCodes.Bne_Un_S;
+                if (b) slimeCodeEndInstruction = (Instruction)x.Operand;
+                return b;
+            }
+        ))
+        {
+            Console.WriteLine("PatchSlimes: failed to match spawn code beginning");
+            return;
+        }
+
+        int fastSlimeCodeOffset = 4;
+
+        Dictionary<Instruction, ILLabelTemplate> slimeCodeLabelTemplates = new();
+        slimeCodeLabelTemplates.Add(slimeCodeEndInstruction, new(-1));
+
+        List<(OpCode, object)> slimeCodeTemplate = new();
+
+        VariableDefinition npcType = new(il.Import(typeof(int)));
+
+        int startIndex = sc.Index;
+
+        for (int i = 0; ; i++)
+        {
+            if ((startIndex + i) >= sc.Instrs.Count)
+            {
+                Console.WriteLine("PatchSlimes: ran off the end while trying to fing the end of slime code");
+                return;
+            }
+            Instruction instr = sc.Instrs[startIndex + i];
+
+            if (instr == slimeCodeEndInstruction)
+                break;
+
+            if (instr.Operand is Instruction target)
+            {
+                if (!slimeCodeLabelTemplates.TryGetValue(target, out ILLabelTemplate? targetLabel))
+                {
+                    targetLabel = new(-1);
+                    slimeCodeLabelTemplates.Add(target, targetLabel);
+                }
+                instr.Operand = targetLabel;
+            }
+            if (instr.MatchLdarg(0))
+            {
+                instr.Operand = il.Method.Parameters[0];
+            }
+            if (instr.MatchLdarg(3))
+            {
+                instr.OpCode = OpCodes.Ldloc;
+                instr.Operand = npcType;
+            }
+            else if (instr.MatchStarg(3))
+            {
+                instr.OpCode = OpCodes.Stloc;
+                instr.Operand = npcType;
+            }
+            else if (instr.MatchRet())
+            {
+                instr.OpCode = OpCodes.Br;
+                instr.Operand = new ILLabelTemplate(-1);
+            }
+
+            slimeCodeTemplate.Add((instr.OpCode, instr.Operand));
+        }
+
+        for (int i = 0; i < slimeCodeTemplate.Count; i++)
+        {
+            if (slimeCodeLabelTemplates.TryGetValue(sc.Instrs[startIndex + i], out ILLabelTemplate? template))
+            {
+                template.targetIndex = i;
+            }
+        }
+
+        foreach (var (instr, label) in slimeCodeLabelTemplates)
+        {
+            if (instr == slimeCodeEndInstruction)
+            {
+                continue;
+            }
+            if (label.targetIndex < 0)
+            {
+                Console.WriteLine("PatchSlimes: slime code jumps into unexpected places");
+                return;
+            }
+        }
+
+        StackAnalysis stack = StackAnalyzer.Analyze(il);
+
+        /*
+            Before each SpawnNPC, check if statically known spawn npc type matches,
+            set returnId, jump to slimeHandler, passing npc type on the stack
+
+            slimeHandler runs the slime code from the beginning on SpawnNPC, then jumps back to returnLabels[returnId]
+        */
+
+        // variables will be preserved across random calls
+        il.Body.Variables.Add(npcType);
+
+        ILCursor c = new(il);
+
+        Dictionary<ILLabelTemplate, ILLabel> slimeCodeLabelInstances = new();
+
+        ulong patched = 0;
+        ulong skipped = 0;
+        ulong patchedEarly = 0;
+
+        while (c.TryGotoNext(
+            x => x.MatchCallOrCallvirt<NPC.Spawner>("SpawnNPC")
+        ))
+        {
+            Instruction spawnNPCinstr = c.Next!;
+            InstructionStackInfo stackInfo = stack.LookupInstruction(spawnNPCinstr, out _)!;
+
+            StackValue typeValue = stackInfo.inValues[stackInfo.inValues.Count - 7];
+
+            Instruction? earliestInstruction = null;
+
+            if (typeValue.producedBy.Count == 1)
+            {
+                StackValue thisValue = stackInfo.inValues[stackInfo.inValues.Count - 10];
+
+                if (thisValue.producedBy.Count == 1 && thisValue.producedBy[0].MatchLdarg(0))
+                {
+                    earliestInstruction = thisValue.producedBy[0];
+                }
+            }
+
+            foreach (Instruction producer in typeValue.producedBy)
+            {
+                bool doSlimeCode = false;
+                bool doFastSlimeCode = false;
+
+                if (producer.MatchLdcI4(out int staticType))
+                {
+                    if (NPCID.FromNetId(staticType) == 1)
+                    {
+                        doSlimeCode = true;
+                        doFastSlimeCode = true;
+                    }
+                }
+                else
+                {
+                    doSlimeCode = true;
+                }
+
+                if (!doSlimeCode)
+                {
+                    skipped++;
+                    continue;
+                }
+                
+                bool early = false;
+                if (earliestInstruction is not null && producer.MatchLdcI4(out _) || producer.MatchLdloc(out _))
+                {
+                    early = true;
+                    c.Goto(producer, MoveType.AfterLabel);
+                    c.Remove();
+
+                    c.Emit(OpCodes.Ldloc, npcType);
+                    c.Emit(OpCodes.Ldc_I4_0);
+                    c.Emit(OpCodes.Stloc, npcType);
+
+                    c.Goto(earliestInstruction, MoveType.AfterLabel);
+                    c.Emit(producer.OpCode, producer.Operand);
+                }
+                else
+                {
+                    c.Goto(producer, MoveType.After);
+                }
+
+                c.Emit(OpCodes.Stloc, npcType);
+
+                startIndex = c.Index;
+                int slimeCodeStartIndex = 0;
+                if (doFastSlimeCode)
+                    slimeCodeStartIndex = fastSlimeCodeOffset;
+
+
+                slimeCodeLabelInstances.Clear();
+                foreach (var label in slimeCodeLabelTemplates.Values)
+                {
+                    slimeCodeLabelInstances.Add(label, il.DefineLabel());
+                }
+
+                for (int i = slimeCodeStartIndex; i < slimeCodeTemplate.Count; i++)
+                {
+                    var (opCode, operand) = slimeCodeTemplate[i];
+
+                    if (operand is ILLabelTemplate template)
+                    {
+                        operand = slimeCodeLabelInstances[template];
+                    }
+
+                    c.Emit(opCode, operand);
+                }
+
+                foreach (var (template, instance) in slimeCodeLabelInstances)
+                {
+                    if (template.targetIndex < 0)
+                    {
+                        c.MarkLabel(instance);
+                    }
+                    else
+                    {
+                        instance.Target = c.Instrs[startIndex + template.targetIndex - slimeCodeStartIndex];
+                    }
+                }
+
+                patched++;
+
+                if (!early)
+                {
+                    c.Emit(OpCodes.Ldloc, npcType);
+                    c.Emit(OpCodes.Ldc_I4_0);
+                    c.Emit(OpCodes.Stloc, npcType);
+                }
+                else {
+                    patchedEarly++;
+                }
+            }
+            c.Goto(spawnNPCinstr, MoveType.After);
+        }
+
+        Console.WriteLine($"PatchSlimes finished, {patched} places patched, {skipped} skipped, {patchedEarly} places patched in early mode");
     }
 }
 

@@ -124,7 +124,14 @@ class NodeRewriter
                 {
                     restParams--;
                 }
-                StackValue value = stackInfo.inValues[stackInfo.inValues.Count - 1 - restParams];
+                StackValue value;
+                try {
+                    value = stackInfo.inValues[stackInfo.inValues.Count - 1 - restParams];
+                }
+                catch {
+                    Console.WriteLine($"Exception at IL_{instr.Offset:x4}");
+                    throw;
+                }
 
                 if (value.producedBy.Count != 1)
                     throw new InvalidOperationException($"Invalid this param value source for random call at IL_{instr.Offset:x4}");

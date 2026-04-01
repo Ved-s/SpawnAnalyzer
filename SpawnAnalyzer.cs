@@ -31,7 +31,6 @@ namespace SpawnAnalyzer;
 
 // TODO: nodes for NPCCount
 // TODO: better selftests?
-// TODO: slime code at the start of SpawnNPC
 // TODO: anything that can go wrong, will go wrong, show warnings and errors
 
 // TODO: build method block tree to determine when locals end
@@ -100,8 +99,8 @@ public class SpawnAnalyzer
             DebugCountdown = 10;
     }
 
-    static void HackMonoModDynamicMethodNRE() {
-
+    static void HackMonoModDynamicMethodNRE()
+    {
         var dynamicMethod = new System.Reflection.Emit.DynamicMethod("method", typeof(void), [], true);
 
         var dmd = new DynamicMethodDefinition("", null, []);
@@ -111,13 +110,17 @@ public class SpawnAnalyzer
 
         List<Hook> hooks = new();
 
-        try {
+        try
+        {
             re.Is("a", "a");
-        } catch (NullReferenceException) {
+        }
+        catch (NullReferenceException)
+        {
             hooks.Add(
                 new Hook(
                     Utils.GetMethodOrThrow(typeof(MonoMod.Utils.Extensions), "Is", [typeof(MethodReference), typeof(string), typeof(string)]),
-                    (Func<MethodReference, string, string, bool> orig, MethodReference method, string typeFullName, string name) => {
+                    (Func<MethodReference, string, string, bool> orig, MethodReference method, string typeFullName, string name) =>
+                    {
                         if (method is DynamicMethodReference)
                             return false;
 
@@ -127,13 +130,17 @@ public class SpawnAnalyzer
             );
         }
 
-        try {
+        try
+        {
             re.Is(typeof(int), "a");
-        } catch (NullReferenceException) {
+        }
+        catch (NullReferenceException)
+        {
             hooks.Add(
                 new Hook(
                     Utils.GetMethodOrThrow(typeof(MonoMod.Utils.Extensions), "Is", [typeof(MethodReference), typeof(Type), typeof(string)]),
-                    (Func<MethodReference, Type, string, bool> orig, MethodReference method, Type type, string name) => {
+                    (Func<MethodReference, Type, string, bool> orig, MethodReference method, Type type, string name) =>
+                    {
                         if (method is DynamicMethodReference)
                             return false;
 
@@ -435,7 +442,7 @@ public class SpawnAnalyzer
 
                             firstSpawn = false;
 
-                            Console.Write($"{spawn.chance * 100:0.0}%");
+                            Console.Write($"{spawn.chance * 100:0.0}% ");
 
                             if (pos is null)
                                 Console.Write($"no pos");

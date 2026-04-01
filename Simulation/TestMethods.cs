@@ -599,4 +599,48 @@ public static class TestMethods
         }
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 230, 0, 0f, 0f, 0f, 0f, 255);
     }
+
+    public static void TestMethod14InitSimulation(SpawnSimulationContext ctx)
+    {
+        Main.tenthAnniversaryWorld = true;
+        ctx.spawner.luck = 0;
+    }
+
+    public static TestNode[] TestMethod14ExpectedTestResults = [
+        new([ // 0
+            (0.5f, [], 1),
+            (0.5f, [], 1),
+        ]),
+        new([ // 1
+            (1f/180, [], 3),
+            (1-(1f/180), [], 2),
+        ]),
+        new([ // 2
+            (1f/180, [667], null),
+            (1-(1f/180), [1], null),
+        ]),
+        new([ // 3
+            (1f/180, [667], null),
+            (1-(1f/180), [-4], null),
+        ]),
+    ];
+
+    public static void TestMethod14(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    {
+        if (Main.rand.Next(2) == 0) {} // 0
+        /*
+            if (NPCID.FromNetId(Type) == 1)
+            {
+                if (this.RollLuck(180) == 0) // 1
+                {
+                    Type = -4;
+                }
+                if (Main.tenthAnniversaryWorld && this.RollLuck(180) == 0) // 2, 3 when Type = -4
+                {
+                    Type = 667;
+                }
+            }
+        */
+        spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
+    }
 }
