@@ -177,9 +177,10 @@ public class SpawnAnNPCRewriter
         ReplaceGetZombieSetings(il);
         RemoveDefaultTargetSet(il);
         PatchFindNearbyBook(il, allowMethods);
-        PatchSlimes(il);
 
         InlineCalls(il);
+
+        PatchSlimes(il);
         il.Instrs.FillWithFakeILOffsets();
 
         StackAnalysis stack = StackAnalyzer.Analyze(il);
@@ -1299,28 +1300,14 @@ public class SpawnAnNPCRewriter
 
             foreach (Instruction producer in typeValue.producedBy)
             {
-                bool doSlimeCode = false;
-                bool doFastSlimeCode = false;
-
-                if (producer.MatchLdcI4(out int staticType))
-                {
-                    if (NPCID.FromNetId(staticType) == 1)
-                    {
-                        doSlimeCode = true;
-                        doFastSlimeCode = true;
-                    }
-                }
-                else
-                {
-                    doSlimeCode = true;
-                }
+                bool doSlimeCode = CanThisInstructionOutputASlimeType(il, producer, stack, out bool doFastSlimeCode, 5) is true or null;
 
                 if (!doSlimeCode)
                 {
                     skipped++;
                     continue;
                 }
-                
+
                 bool early = false;
                 if (earliestInstruction is not null && producer.MatchLdcI4(out _) || producer.MatchLdloc(out _))
                 {
@@ -1386,7 +1373,8 @@ public class SpawnAnNPCRewriter
                     c.Emit(OpCodes.Ldc_I4_0);
                     c.Emit(OpCodes.Stloc, npcType);
                 }
-                else {
+                else
+                {
                     patchedEarly++;
                 }
             }
@@ -1394,6 +1382,90 @@ public class SpawnAnNPCRewriter
         }
 
         Console.WriteLine($"PatchSlimes finished, {patched} places patched, {skipped} skipped, {patchedEarly} places patched in early mode");
+    }
+
+    static bool? CanThisInstructionOutputASlimeType(ILContext il, Instruction instr, StackAnalysis stack, out bool allValuesAreSlimeTypes, int recursionLimit)
+    {
+        allValuesAreSlimeTypes = false;
+
+        if (recursionLimit <= 0)
+            return null;
+
+        if (instr.MatchLdcI4(out int staticType))
+        {
+            if (NPCID.FromNetId(staticType) == 1)
+            {
+                allValuesAreSlimeTypes = true;
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+        else if (instr.MatchLdloc(out int loc))
+        {
+            foreach (Instruction instr2 in il.Instrs)
+            {
+                if (instr2.MatchLdloca(loc))
+                {
+                    return null;
+                }
+                if (!instr2.MatchStloc(loc))
+                    continue;
+
+                InstructionStackInfo? svi = stack.LookupInstruction(instr2, out _);
+                if (svi is null)
+                    return null;
+
+                StackValue sv = svi.inValues[svi.inValues.Count - 1];
+
+                foreach (Instruction valueProducer in sv.producedBy)
+                {
+                    var res = CanThisInstructionOutputASlimeType(il, valueProducer, stack, out _, recursionLimit-1);
+
+                    if (res is not false)
+                        return res;
+                }
+            }
+            return false;
+        }
+        else if (instr.MatchCallOrCallvirt<UnifiedRandom>("Next")) {
+
+            MethodReference next = (MethodReference)instr.Operand;
+
+            if (next.Parameters.Count != 2)
+                return null;
+
+            InstructionStackInfo? stackInfo = stack.LookupInstruction(instr, out _);
+            if (stackInfo is null)
+                return null;
+
+            int rangeStart = 0;
+            int rangeEndExcl = 0;
+
+            StackValue min = stackInfo.inValues[stackInfo.inValues.Count - 2];
+            StackValue max = stackInfo.inValues[stackInfo.inValues.Count - 1];
+
+            if (min.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeStart)) {
+                return null;
+            }
+            
+            if (max.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeEndExcl)) {
+                return null;
+            }
+
+            for (int i = rangeStart; i < rangeEndExcl; i++) {
+                if (NPCID.FromNetId(i) == 1) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Terraria.Utils.SelectRandom also gets used in 9 places, can be checked too
+
+        return null;
     }
 }
 
