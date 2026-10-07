@@ -323,10 +323,11 @@ public class SpawnAnalyzer
             int x = 100;
             int y = 100;
             int tileType = TileID.Grass;
+            int wallType = WallID.None;
 
             SpawnerChances chances = SpawnerChances.WithValuesFrom(spawner);
 
-            SpawnSimulationContext ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, false);
+            SpawnSimulationContext ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, wallType, false);
 
             TestMethods.PrepareSimulationForTest(i, ctx);
 

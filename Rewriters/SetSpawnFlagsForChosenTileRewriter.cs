@@ -23,6 +23,7 @@ class SetSpawnFlagsForChosenTileRewriter
                 typeof(int),
                 typeof(int),
                 typeof(int),
+                typeof(int),
             ]
         ));
 

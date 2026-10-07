@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -13,13 +14,16 @@ namespace SpawnAnalyzer;
 
 public class SpawnAnalysisSpot
 {
-    public Point position;
+    public Point spawnPosition;
+    public Point tilePosition;
 
     readonly int spawnTileType;
     readonly int spawnWallType;
 
     public ulong hits = 1;
     public float chance = 0;
+
+    public readonly float validChance;
 
     readonly bool xRange;
 
@@ -32,29 +36,71 @@ public class SpawnAnalysisSpot
 
     public bool NonDeterministic = false;
 
-    public SpawnAnalysisSpot(SpawnAnalysis analysis, Point position, SpawnParamsStage1 p, SimulatorImpl impl)
+    private SpawnAnalysisSpot(
+        SpawnerChances chances,
+        NPC.Spawner localSpawner,
+        SpawnAnalysis analysis,
+        SpawnSimulationContext simulationContext,
+        SpawnParamsStage1 p,
+        Point spawnPosition,
+        Point tilePosition,
+        int spawnTileType,
+        int spawnWallType,
+        float validChance
+    )
     {
+        this.chances = chances;
+        this.localSpawner = localSpawner;
         this.analysis = analysis;
-        this.position = position;
+        this.simulationContext = simulationContext;
 
-        NPC.Spawner.GetProperGroundSpawnTileTypeAndWallType(position.X, position.Y, out spawnTileType, out spawnWallType);
+        localSpawner.skyMob = p.skyMob;
+        xRange = p.xRange;
+        this.spawnPosition = spawnPosition;
+        this.tilePosition = tilePosition;
+        this.spawnTileType = spawnTileType;
+        this.spawnWallType = spawnWallType;
+        this.validChance = validChance;
+    }
+
+    public static bool TryConstructSpawnSpot(
+        SpawnAnalysis analysis, Point position, SpawnParamsStage1 p, SimulatorImpl impl,
+        [NotNullWhen(true)] out SpawnAnalysisSpot? spot
+    )
+    {
+        Point spawnPosition = position;
+
+        NPC.Spawner.FindGroundTile(position.X, position.Y, out int groundY);
+
+        Point tilePosition = new(position.X, groundY);
+
+        int spawnTileType = (int)Main.tile[tilePosition.X, tilePosition.Y].type;
+        int spawnWallType = NPC.Spawner.GetSpawnWallType(spawnPosition.X, spawnPosition.Y);
+        
+        float validChance = impl.PostCheckChosenSpawnTileImpl(analysis.globalSpawner, position.X, position.Y, spawnTileType, spawnWallType);
+        if (validChance <= 0)
+        {
+            spot = null;
+            return false;
+        }
+
 #pragma warning disable SYSLIB0050 // Type or member is obsolete
         var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
 #pragma warning restore SYSLIB0050 // Type or member is obsolete
         ShallowCloneFields(analysis.globalSpawner, spawner);
-        localSpawner = spawner;
 
-        localSpawner.skyMob = p.skyMob;
-        xRange = p.xRange;
-
-        SpawnerChances localChances = SpawnerChances.WithValuesFrom(localSpawner);
+        SpawnerChances localChances = SpawnerChances.WithValuesFrom(spawner);
         SpawnerChances.CopyGlobalFields(analysis.globalSpawnerChances, localChances);
 
-        impl.SetSpawnFlagsForChosenTileImpl(localSpawner, this.position.X, this.position.Y, spawnTileType, spawnWallType, localChances);
+        impl.SetSpawnFlagsForChosenTileImpl(spawner, spawnPosition.X, spawnPosition.Y, tilePosition.Y, spawnTileType, spawnWallType, localChances);
 
-        chances = localChances;
+        SpawnSimulationContext simulationContext = new(impl.SpawnAnNpcRewrite, localChances, spawner, spawnPosition.X, spawnPosition.Y, spawnTileType, spawnWallType, p.xRange);
 
-        simulationContext = new(impl.SpawnAnNpcRewrite, chances, localSpawner, this.position.X, this.position.Y, spawnTileType, xRange);
+        spot = new SpawnAnalysisSpot(
+            localChances, spawner, analysis, simulationContext, p, 
+            spawnPosition, tilePosition, spawnTileType, spawnWallType, validChance
+        );
+        return true;
     }
 
     internal void Simulate(out TimeSpan analysisTime, SpawnAnalysisResults outResults)
@@ -71,7 +117,7 @@ public class SpawnAnalysisSpot
         AnalyzedSpawns spawnresults = SpawnNodeAnalyzer.Analyze(results.Value);
 
         Dictionary<int, List<AnalyzedSpawn>> allStartSpawns = new();
-        outResults.starting[position] = allStartSpawns;
+        outResults.starting[spawnPosition] = allStartSpawns;
 
         Dictionary<Point, List<AnalyzedSpawn>> finalPosSpawns = new();
         List<AnalyzedSpawn> localTotalSpawns = new();
@@ -167,7 +213,7 @@ public class SpawnAnalysisSpot
         mouseOverText.AppendLine($"({chance * 100:0.00}% to be picked to spawn)");
     }
 
-    void ShallowCloneFields<T>(T from, T to)
+    static void ShallowCloneFields<T>(T from, T to)
     {
         foreach (FieldInfo field in typeof(T).GetFields())
         {

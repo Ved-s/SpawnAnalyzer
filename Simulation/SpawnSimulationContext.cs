@@ -15,6 +15,7 @@ public class SpawnSimulationContext
     public int spawnTileX;
     public int spawnTileY;
     public int spawnTileType;
+    public int spawnWallType;
     public bool xRange;
 
     List<SimulationNode?> populatedNodes = [];
@@ -44,6 +45,7 @@ public class SpawnSimulationContext
         int spawnTileX,
         int spawnTileY,
         int spawnTileType,
+        int spawnWallType,
         bool xRange
     )
     {
@@ -53,6 +55,7 @@ public class SpawnSimulationContext
         this.spawnTileX = spawnTileX;
         this.spawnTileY = spawnTileY;
         this.spawnTileType = spawnTileType;
+        this.spawnWallType = spawnWallType;
         this.xRange = xRange;
     }
 

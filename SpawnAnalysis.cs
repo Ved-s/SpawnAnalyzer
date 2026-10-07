@@ -2,14 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Text;
-using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
-using ReLogic.Graphics;
-using ReLogic.Reflection;
 using SpawnAnalyzer.UI;
 using Terraria;
 using Terraria.Audio;
@@ -25,6 +20,7 @@ public class SpawnAnalysis
     public Rectangle safeArea;
 
     public readonly Dictionary<Point, SpawnAnalysisSpot> foundSpawnSpots = new();
+    public readonly Dictionary<Point, SpawnAnalysisSpot> foundTileSpots = new();
 
     public readonly SpawnAnalysisResults results = new();
 
@@ -74,12 +70,18 @@ public class SpawnAnalysis
                 int yRef = y;
                 if (impl.GetSpawnTileParamsImpl(globalSpawner, player, ref xRef, ref yRef, spawnArea, safeArea, out SpawnParamsStage1 spawnParams))
                 {
-                    validSpawnSpots++;
                     if (!foundSpawnSpots.TryGetValue(new(xRef, yRef), out SpawnAnalysisSpot? spot))
                     {
-                        foundSpawnSpots.Add(new(xRef, yRef), new SpawnAnalysisSpot(this, new(xRef, yRef), spawnParams, impl));
+                        if (!SpawnAnalysisSpot.TryConstructSpawnSpot(this, new(xRef, yRef), spawnParams, impl, out spot)) {
+                            continue;
+                        }
+
+                        validSpawnSpots++;
+                        foundSpawnSpots.Add(new(xRef, yRef), spot);
+                        foundTileSpots.TryAdd(spot.tilePosition, spot);
                         continue;
                     }
+                    validSpawnSpots++;
                     spot.hits++;
 
                     if (!warning && spot.GetStage1Params() != spawnParams)
@@ -98,7 +100,7 @@ public class SpawnAnalysis
         foreach (SpawnAnalysisSpot spot in foundSpawnSpots.Values)
         {
             float chance = (float)((double)spot.hits / totalSpawnSpots);
-            spot.chance = chance * chanceMul;
+            spot.chance = chance * chanceMul * spot.validChance;
         }
 
         sw.Stop();
@@ -157,7 +159,7 @@ public class SpawnAnalysis
 
         HashSet<Point> drawnSpots = new();
 
-        IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.final.Keys);
+        IEnumerable<Point> allSpots = foundSpawnSpots.Keys.Concat(results.final.Keys).Concat(foundTileSpots.Keys);
 
         Point mouseWorldPos = Main.MouseWorld.ToPoint();
         mouseWorldPos.X /= 16;
@@ -179,6 +181,7 @@ public class SpawnAnalysis
             );
 
             bool spawnSpot = foundSpawnSpots.ContainsKey(pos);
+            bool tileSpot = foundTileSpots.ContainsKey(pos);
             bool spawnResult = results.final.ContainsKey(pos);
 
             Color color;
@@ -192,8 +195,18 @@ public class SpawnAnalysis
                 color = Color.Lerp(Color.Lime, Color.Yellow, 0.5f) * colorScale;
             else if (spawnSpot)
                 color = Color.Lime * colorScale;
-            else
+            else if (spawnResult)
                 color = Color.Yellow * colorScale;
+            else if (tileSpot) {
+                if (SpawnAnalyzerUI.Visible && foundTileSpots[pos].spawnPosition == SpawnAnalyzerUI.SelectedPos) {
+                    color = Color.Lerp(Color.Aqua, Color.Magenta, 0.5f) * colorScale;
+                }
+                else {
+                    color = Color.Aqua * colorScale;
+                }
+            }
+            else 
+                continue;
 
             bool hover = mouseWorldPos == pos;
             if (hover && SpawnAnalyzerUI.Visible)
@@ -211,7 +224,12 @@ public class SpawnAnalysis
 
                 if (Main.mouseLeft && Main.mouseLeftRelease)
                 {
-                    SpawnAnalyzerUI.SelectedPos = pos;
+                    if (tileSpot && !spawnSpot && !spawnResult) {
+                        SpawnAnalyzerUI.SelectedPos = foundTileSpots[pos].spawnPosition;
+                    }
+                    else {
+                        SpawnAnalyzerUI.SelectedPos = pos;
+                    }
                     SoundEngine.PlaySound(SoundID.MenuTick);
                 }
             }

@@ -9,12 +9,14 @@ public class SimulatorImpl
 {
     public SimulatorImpl(
         GetSpawnTileParams getSpawnTileParamsImpl, 
+        PostCheckChosenSpawnTile postCheckChosenSpawnTileImpl,
         SetSpawnFlagsForChosenTile setSpawnFlagsForChosenTileImpl, 
         GetSpawnRate getSpawnRateImpl, 
         SpawnAnNPCRewriteData spawnAnNpcRewrite
     )
     {
         GetSpawnTileParamsImpl = getSpawnTileParamsImpl;
+        PostCheckChosenSpawnTileImpl = postCheckChosenSpawnTileImpl;
         SetSpawnFlagsForChosenTileImpl = setSpawnFlagsForChosenTileImpl;
         GetSpawnRateImpl = getSpawnRateImpl;
         SpawnAnNpcRewrite = spawnAnNpcRewrite;
@@ -23,7 +25,10 @@ public class SimulatorImpl
     public delegate bool GetSpawnTileParams(NPC.Spawner spawner, Player player, ref int x, ref int y, Rectangle spawnArea, Rectangle safeArea, out SpawnParamsStage1 spawnParams);
     public GetSpawnTileParams GetSpawnTileParamsImpl;
 
-    public delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, SpawnerChances spawnParams);
+    public delegate float PostCheckChosenSpawnTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int tileType, int wallType);
+    public PostCheckChosenSpawnTile PostCheckChosenSpawnTileImpl;
+
+    public delegate void SetSpawnFlagsForChosenTile(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int groundTileY, int spawnTileType, int spawnWallType, SpawnerChances spawnParams);
     public SetSpawnFlagsForChosenTile SetSpawnFlagsForChosenTileImpl;
 
     public delegate void GetSpawnRate(NPC.Spawner spawner, Player player, out int spawnRate, out int maxSpawns, SpawnerChances spawnParams);
@@ -34,12 +39,14 @@ public class SimulatorImpl
     public static SimulatorImpl GenerateImpl()
     {
         var getSpawnTileParamsImpl = GetSpawnTileParamsRewriter.GenerateMethod();
+        var postCheckChosenSpawnTileImpl = PostCheckChosenSpawnTileRewriter.GenerateMethod();
         var setSpawnFlagsForChosenTileImpl = SetSpawnFlagsForChosenTileRewriter.GenerateMethod();
         var getSpawnRateImpl = GetSpawnRateRewriter.GenerateMethod();
         var spawnAnNpcRewrite = SpawnAnNPCRewriter.RewriteMethod(null);
 
         return new(
             getSpawnTileParamsImpl,
+            postCheckChosenSpawnTileImpl,
             setSpawnFlagsForChosenTileImpl,
             getSpawnRateImpl,
             spawnAnNpcRewrite

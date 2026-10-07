@@ -60,7 +60,7 @@ public static class HookIn
             using (Stream manifestResourceStream = typeof(Terraria.Program).Assembly.GetManifestResourceStream(text)!)
             {
                 byte[] array = new byte[manifestResourceStream.Length];
-                manifestResourceStream.Read(array, 0, array.Length);
+                manifestResourceStream.ReadExactly(array, 0, array.Length);
                 assembly = Assembly.Load(array);
             }
             Console.WriteLine("Found");

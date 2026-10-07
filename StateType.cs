@@ -377,7 +377,9 @@ public class StateType
         if (a is null)
             return null;
 
-        return new Tile(a);
+        Tile tile = new();
+        tile.CopyFrom(a);
+        return tile;
     }
 
     static bool PointArrayEq(Point[]? a, Point[]? b)

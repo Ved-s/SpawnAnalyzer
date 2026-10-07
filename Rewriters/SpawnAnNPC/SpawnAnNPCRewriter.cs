@@ -63,6 +63,7 @@ public class SpawnAnNPCRewriter
                 typeof(int),
                 typeof(int),
                 typeof(int),
+                typeof(int),
                 typeof(bool),
                 typeof(int),
             ]
@@ -177,6 +178,7 @@ public class SpawnAnNPCRewriter
         ReplaceGetZombieSetings(il);
         RemoveDefaultTargetSet(il);
         PatchFindNearbyBook(il, allowMethods);
+        PatchGnomeInlineExpr(il);
 
         InlineCalls(il);
 
@@ -370,7 +372,7 @@ public class SpawnAnNPCRewriter
 
             Instruction targetProducer = targetValue.producedBy[0];
 
-            if (!targetProducer.MatchLdarg(5))
+            if (!targetProducer.MatchLdarg(6))
             {
                 Console.WriteLine($"Unsupported target value producer for NPC.SpawnOnPlayer at IL_{instr.Offset:x4}");
                 continue;
@@ -424,20 +426,20 @@ public class SpawnAnNPCRewriter
                 1 => "spawnTileX",
                 2 => "spawnTileY",
                 3 => "spawnTileType",
-                4 => "xRange",
+                4 => "spawnWallType",
+                5 => "xRange",
                 _ => null
             };
 
             if (field is null)
             {
-                if (arg == 5)
+                if (arg == 6)
                 {
-                    c.Next!.OpCode = OpCodes.Ldc_I4_0;
-                    c.Next!.Operand = null;
+                    c.Next!.OpCode = OpCodes.Ldsfld;
+                    c.Next!.Operand = c.IL.Import(Utils.GetFieldOrThrow<Main>("myPlayer"));
                     continue;
                 }
-                else
-                    throw new NotImplementedException($"ldarg {arg} at IL_{c.Next!.Offset:x4}");
+                throw new NotImplementedException($"ldarg {arg} at IL_{c.Next!.Offset:x4}");
             }
 
             Instruction oldInstruction = c.Next!;
@@ -600,6 +602,8 @@ public class SpawnAnNPCRewriter
             Utils.GetMethodOrThrow<NPC.Spawner>("SpawnHornet"),
             Utils.GetMethodOrThrow<NPC.Spawner>("SpawnFrog"),
             Utils.GetMethodOrThrow<NPC.Spawner>("SpawnLavaBaitCritters"),
+
+            Utils.GetMethodOrThrow<NPC.Spawner>("CheckToSpawnUndergroundGnomes"),
 
             Utils.GetMethodOrThrow<NPC>("FindCattailTop"),
             Utils.GetMethodOrThrow<NPC>("NearSpikeBall"),
@@ -901,7 +905,7 @@ public class SpawnAnNPCRewriter
     {
         /*
             IL_AAAB: ldarg.0
-            IL_AAAC: ldarg.s   target (5)
+            IL_AAAC: ldarg.s   target (6)
             IL_AAAE: stfld     int32 Terraria.NPC/Spawner::defaultTarget
         */
 
@@ -910,7 +914,7 @@ public class SpawnAnNPCRewriter
         while (c.TryGotoNext(
             MoveType.AfterLabel,
             x => x.MatchLdarg(0),
-            x => x.MatchLdarg(5),
+            x => x.MatchLdarg(6),
             x => x.MatchStfld<NPC.Spawner>("defaultTarget")
         ))
         {
@@ -1015,6 +1019,38 @@ public class SpawnAnNPCRewriter
 
             c.MarkLabel(end);
         }
+    }
+
+    static void PatchGnomeInlineExpr(ILContext il) {
+        /*
+             br.s      
+             ldc.i4.0
+            +stloc     validGnomeSpawn
+            +ldloc     validGnomeSpawn
+
+             ldloc.s   gnomeChance
+             call      instance bool Terraria.NPC/Spawner::CheckToSpawnUndergroundGnomes(int32, int32, bool, int32)
+        */
+
+        ILCursor c = new(il);
+
+        if (!c.TryGotoNext(
+            x=>x.MatchBr(out _),
+            x=>x.MatchLdcI4(0),
+            x=>x.MatchLdloc(out _),
+            x=>x.MatchCall<NPC.Spawner>("CheckToSpawnUndergroundGnomes")
+        )) {
+            throw new Exception("PatchGnomeInlineExpr patch fail");
+        }
+
+        VariableDefinition validGnomeSpawn = new(il.Import(typeof(bool)));
+
+        c.Goto(c.Index + 2, MoveType.AfterLabel);
+
+        c.Emit(OpCodes.Stloc, validGnomeSpawn);
+        c.Emit(OpCodes.Ldloc, validGnomeSpawn);
+
+        il.Body.Variables.Add(validGnomeSpawn);
     }
 
     public class FindNearbyBookReturnValue
