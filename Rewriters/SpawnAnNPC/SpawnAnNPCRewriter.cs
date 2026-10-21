@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -73,6 +72,16 @@ public class SpawnAnNPCRewriter
 
         DynamicMethodDefinition dmd = new(method);
 
+        int size = 0;
+        foreach (Instruction instr in dmd.Definition.Body.Instructions)
+        {
+            size += instr.GetSize();
+        }
+
+        float sizeKb = (float)size / 1024;
+
+        Console.WriteLine($"{method.Name} simulator codegen begin, code size: {sizeKb:0.00}kb, instructions: {dmd.Definition.Body.Instructions.Count}, locals: {dmd.Definition.Body.Variables.Count}");
+
         SimulatorCodegen codegen = new(dmd, new StaticdataFieldNameParameterHandler(SpawnAnNpcStaticData.ProvideArg))
         {
             DebugPrintout = debug
@@ -103,8 +112,13 @@ public class SpawnAnNPCRewriter
         PatchSlimes(codegen.IL);
 
         codegen.IL.Instrs.FillWithFakeILOffsets();
-        codegen.PrepareForNodeCodegen();
+        codegen.AnalyzeStack();
 
+        RewriteSpawnNPCCalls(codegen);
+        RewriteSpawnOnPlayerCalls(codegen);
+
+        codegen.PrepareForNodeCodegen();
+        
         SimulationLuckMethods luck = new()
         {
             GetLuck = sim => ((SpawnAnNpcStaticData)sim.staticSimData).spawner.luck,
@@ -122,9 +136,6 @@ public class SpawnAnNPCRewriter
         {
             throw new Exception($"Found Main.rand reference at IL_{c.Next!.Offset:x4}, should have none left");
         }
-
-        RewriteSpawnNPCCalls(codegen);
-        RewriteSpawnOnPlayerCalls(codegen);
 
         codegen.AnalyzeStack();
 
@@ -309,14 +320,17 @@ public class SpawnAnNPCRewriter
                 MethodBase resolved = method.ResolveReflection();
 
                 bool okMethod = false;
-                foreach (var p in method.Parameters) {
-                    if (p.ParameterType.Is(typeof(Simulator))) {
+                foreach (var p in method.Parameters)
+                {
+                    if (p.ParameterType.Is(typeof(Simulator)))
+                    {
                         okMethod = true;
                         continue;
                     }
                 }
 
-                if (okMethod) {
+                if (okMethod)
+                {
                     continue;
                 }
 
@@ -869,8 +883,8 @@ public class SpawnAnNPCRewriter
             c.Emit(OpCodes.Ldlen);
             c.Emit(OpCodes.Conv_I4);
 
-            c.Emit(OpCodes.Call, Utils.GetFieldOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.FakeRandomNext)));
-            c.Emit(OpCodes.Call, Utils.GetFieldOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.AllUniqueValueHandlerMarker)));
+            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.FakeRandomNext)));
+            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.AllUniqueValueHandlerMarker)));
             c.Emit(OpCodes.Ldloca, bookPosition);
             c.Emit<FindNearbyBookReturnValue>(OpCodes.Call, nameof(FindNearbyBookReturnValue.GetPoint));
             c.Emit(OpCodes.Ldc_I4_1);
@@ -1332,7 +1346,6 @@ public class SpawnAnNPCRewriter
         }
         else if (instr.MatchCallOrCallvirt<UnifiedRandom>("Next"))
         {
-
             MethodReference next = (MethodReference)instr.Operand;
 
             if (next.Parameters.Count != 2)
@@ -1366,6 +1379,106 @@ public class SpawnAnNPCRewriter
                 }
             }
 
+            return false;
+        }
+        else if (instr.MatchCall("Terraria.Utils", "SelectRandom"))
+        {
+            int pos = il.Instrs.IndexOf(instr);
+
+            /*
+                ldc.i4.s  11
+		        newarr    [System.Runtime]System.Int32
+		        dup
+		        ldtoken   field valuetype '<PrivateImplementationDetails>'/'__StaticArrayInitTypeSize=44' '<PrivateImplementationDetails>'::F3BD6507212EB75B6DB7F1C7806475496C0F44846A87675EED189766EC7609D1
+		        call      void [System.Runtime]System.Runtime.CompilerServices.RuntimeHelpers::InitializeArray(class [System.Runtime]System.Array, valuetype [System.Runtime]System.RuntimeFieldHandle)
+            */
+
+            int matchPos = pos - 4;
+
+            int matchedIncrementalInits = 0;
+            int val = 0;
+
+            while (matchPos >= 0 && SpawnAnalyzer.MatchInstructions(
+                il, matchPos, out _,
+                x => x.MatchDup(),
+                x => x.MatchLdcI4(out _),
+                x => x.MatchLdcI4(out val),
+                x => x.MatchStelemI4()
+            ))
+            {
+                matchPos -= 4;
+                matchedIncrementalInits++;
+                if (NPCID.FromNetId(val) == 1)
+                {
+                    return true;
+                }
+            }
+
+            if (matchedIncrementalInits > 0 && matchPos >= 0)
+            {
+                matchPos += 2;
+                if (!SpawnAnalyzer.MatchInstructions(
+                    il, matchPos, out _,
+                    x => x.MatchLdcI4(out _),
+                    x => x.MatchNewarr(out _)
+                ))
+                {
+                    return null;
+                }
+
+                return false;
+            }
+
+            matchPos = pos - 5;
+            if (matchPos < 0)
+                return null;
+
+            int arrayLen = 0;
+            TypeReference valueType = null!;
+            IMetadataTokenProvider fieldProvider = null!;
+
+            if (!SpawnAnalyzer.MatchInstructions(
+                il, matchPos, out _,
+                x => x.MatchLdcI4(out arrayLen),
+                x => x.MatchNewarr(out valueType!),
+                x => x.MatchDup(),
+                x => x.MatchLdtoken(out fieldProvider!),
+                x => x.MatchCall(out MethodReference? m) && m!.Name == "InitializeArray"
+            ))
+            {
+                return null;
+            }
+
+            if (fieldProvider is not FieldReference field)
+                return null;
+
+            RuntimeFieldHandle handle = field.ResolveReflection().FieldHandle;
+            IEnumerable<int> values;
+
+            if (valueType.Is(typeof(int)))
+            {
+                int[] data = new int[arrayLen];
+                RuntimeHelpers.InitializeArray(data, handle);
+                values = data;
+            }
+            else if (valueType.Is(typeof(short)))
+            {
+                short[] data = new short[arrayLen];
+                RuntimeHelpers.InitializeArray(data, handle);
+                values = data.Select(d => (int)d);
+            }
+            else
+            {
+                return null;
+            }
+
+            foreach (int v in values)
+            {
+                if (NPCID.FromNetId(v) == 1)
+                {
+                    return true;
+                }
+            }
             return false;
         }
 
