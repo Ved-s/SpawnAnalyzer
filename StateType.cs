@@ -10,7 +10,7 @@ using Terraria;
 
 namespace SpawnAnalyzer;
 
-public class StateType
+public class DynamicStateType
 {
     static readonly AssemblyBuilder TypeAssembly =
         AssemblyBuilder.DefineDynamicAssembly(
@@ -22,48 +22,57 @@ public class StateType
 
     public static readonly Dictionary<Type, MethodInfo> EqMethods = new()
     {
-        {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListEq))},
-        {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DEq))},
-        {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DEq))},
-        {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileEq))},
-        {typeof(Point[]),   Utils.GetMethodOrThrow<StateType>(nameof(PointArrayEq))},
+        {typeof(List<int>), Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntListEq))},
+        {typeof(int[]),     Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntArray1DEq))},
+        {typeof(int[,]),    Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntArray2DEq))},
+        {typeof(Tile),      Utils.GetMethodOrThrow<DynamicStateType>(nameof(TileEq))},
+        {typeof(Point[]),   Utils.GetMethodOrThrow<DynamicStateType>(nameof(PointArrayEq))},
 
-        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<StateType>(nameof(FindNearbyBookReturnValueEq))},
+        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<DynamicStateType>(nameof(FindNearbyBookReturnValueEq))},
     };
 
     public static readonly Dictionary<Type, MethodInfo> CloneMethods = new()
     {
-        {typeof(List<int>), Utils.GetMethodOrThrow<StateType>(nameof(IntListClone))},
-        {typeof(int[]),     Utils.GetMethodOrThrow<StateType>(nameof(IntArray1DClone))},
-        {typeof(int[,]),    Utils.GetMethodOrThrow<StateType>(nameof(IntArray2DClone))},
-        {typeof(Tile),      Utils.GetMethodOrThrow<StateType>(nameof(TileClone))},
-        {typeof(Point[]),   Utils.GetMethodOrThrow<StateType>(nameof(PointArrayClone))},
+        {typeof(List<int>), Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntListClone))},
+        {typeof(int[]),     Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntArray1DClone))},
+        {typeof(int[,]),    Utils.GetMethodOrThrow<DynamicStateType>(nameof(IntArray2DClone))},
+        {typeof(Tile),      Utils.GetMethodOrThrow<DynamicStateType>(nameof(TileClone))},
+        {typeof(Point[]),   Utils.GetMethodOrThrow<DynamicStateType>(nameof(PointArrayClone))},
 
-        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<StateType>(nameof(FindNearbyBookReturnValueClone))},
+        {typeof(SpawnAnNPCRewriter.FindNearbyBookReturnValue),   Utils.GetMethodOrThrow<DynamicStateType>(nameof(FindNearbyBookReturnValueClone))},
     };
 
     public Type Type;
 
+    public Func<object>? Constructor;
     public new Func<object, object, bool> Equals;
     public Func<object, object> Clone;
 
-    public StateType(Type type, Func<object, object, bool> equals, Func<object, object> clone)
+    public DynamicStateType(Type type, Func<object>? ctor, Func<object, object, bool> equals, Func<object, object> clone)
     {
         Type = type;
+        Constructor = ctor;
         Equals = equals;
         Clone = clone;
     }
 
-    public static string GetFieldName(int index) => $"v{index}";
+    public object CreateNew() {
+        if (Constructor is null) {
+            return Activator.CreateInstance(Type)!;
+        }
+        return Constructor();
+    }
 
-    public static StateType Generate(string typeName, IEnumerable<Type> fieldTypes)
+    public static string GetAutoFieldName(int index) => $"v{index}";
+
+    public static DynamicStateType Generate(string typeName, IEnumerable<Type> fieldTypes)
     {
         TypeBuilder typeBuilder = TypeModule.DefineType(typeName);
 
         int index = 0;
         foreach (Type fieldType in fieldTypes)
         {
-            typeBuilder.DefineField(GetFieldName(index), fieldType, FieldAttributes.Public);
+            typeBuilder.DefineField(GetAutoFieldName(index), fieldType, FieldAttributes.Public);
             index++;
         }
 
@@ -72,7 +81,7 @@ public class StateType
         Func<object, object, bool> eq = GenerateEqMethod(type);
         Func<object, object> clone = GenerateCloneMethod(type);
 
-        return new StateType(type, eq, clone);
+        return new DynamicStateType(type, null, eq, clone);
     }
 
     public static void GenerateMethodsFor(Type type) {

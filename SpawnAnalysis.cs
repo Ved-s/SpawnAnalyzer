@@ -78,7 +78,7 @@ public class SpawnAnalysis
 
                         validSpawnSpots++;
                         foundSpawnSpots.Add(new(xRef, yRef), spot);
-                        foundTileSpots.TryAdd(spot.tilePosition, spot);
+                        foundTileSpots[spot.tilePosition] = spot;
                         continue;
                     }
                     validSpawnSpots++;

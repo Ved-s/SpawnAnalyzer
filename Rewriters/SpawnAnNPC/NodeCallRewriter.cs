@@ -358,7 +358,7 @@ class NodeRewriter
         entryJumps.Add(entryJumpLabel);
 
         // TODO: cache
-        StateType? stackStateType = null;
+        DynamicStateType? stackStateType = null;
 
         List<StackValuePreserveType> stackValuePreserves = new();
 
@@ -399,7 +399,7 @@ class NodeRewriter
                 stackValuePreserves.Add(pt);
             }
 
-            stackStateType = StateType.Generate($"RandomCallStackState_{StackStatesGenerated}", typesToPreserve);
+            stackStateType = DynamicStateType.Generate($"RandomCallStackState_{StackStatesGenerated}", typesToPreserve);
             StackStatesGenerated++;
 
             MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackValues, stackValuePreserves, stackStateType.Type);
@@ -457,7 +457,7 @@ class NodeRewriter
                 {
                     case StackValuePreserveType.Preserve:
                         c.Emit(OpCodes.Ldloc, stackStateVar);
-                        c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, StateType.GetFieldName(fieldIndex)));
+                        c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, DynamicStateType.GetAutoFieldName(fieldIndex)));
                         fieldIndex++;
                         break;
 
@@ -712,7 +712,7 @@ class NodeRewriter
             {
                 il.Emit(ROpCodes.Ldloc, stateVar);
                 il.Emit(ROpCodes.Ldarg, i);
-                il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, StateType.GetFieldName(fieldIndex)));
+                il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, DynamicStateType.GetAutoFieldName(fieldIndex)));
 
                 fieldIndex++;
             }

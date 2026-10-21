@@ -12,9 +12,9 @@ public class LocalStateInfo
 {
     static int GeneratedCount = 0;
 
-    public static StateType RewriteLocalState(ILContext il, ParameterDefinition contextParam)
+    public static DynamicStateType RewriteLocalState(ILContext il, ParameterDefinition contextParam)
     {
-        StateType type = StateType.Generate($"MethodLocalVarState_{GeneratedCount}", il.Body.Variables.Select(v => v.VariableType.ResolveReflection()));
+        DynamicStateType type = DynamicStateType.Generate($"MethodLocalVarState_{GeneratedCount}", il.Body.Variables.Select(v => v.VariableType.ResolveReflection()));
         GeneratedCount++;
 
         ILCursor c = new(il);
@@ -31,7 +31,7 @@ public class LocalStateInfo
             c.Next!.Operand = contextParam;
             c.Index += 1;
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
-            c.Emit(OpCodes.Ldfld, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
+            c.Emit(OpCodes.Ldfld, il.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
         }
 
         c.Index = 0;
@@ -46,7 +46,7 @@ public class LocalStateInfo
             c.Emit(OpCodes.Ldarg, contextParam);
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
             c.Emit(OpCodes.Ldloc, local);
-            c.Emit(OpCodes.Stfld, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
+            c.Emit(OpCodes.Stfld, il.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
         }
 
         c.Index = 0;
@@ -61,7 +61,7 @@ public class LocalStateInfo
             c.Next!.Operand = contextParam;
             c.Index += 1;
             c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, "localState");
-            c.Emit(OpCodes.Ldflda, il.Import(Utils.GetFieldOrThrow(type.Type, StateType.GetFieldName(local))));
+            c.Emit(OpCodes.Ldflda, il.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
         }
 
         return type;

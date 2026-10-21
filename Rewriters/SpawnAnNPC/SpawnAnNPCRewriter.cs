@@ -56,6 +56,7 @@ public class SpawnAnNPCRewriter
         ..StindOpcodes,
         ..StelemOpcodes
     ];
+    
     public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true, bool printoutAfter = false)
     {
         MethodInfo method = methodOverride ?? Utils.GetMethodOrThrow<NPC.Spawner>("SpawnAnNPC",
@@ -75,7 +76,7 @@ public class SpawnAnNPCRewriter
 
         ILContext il = new(dmd.Definition);
 
-        StateType ls = null!;
+        DynamicStateType ls = null!;
 
         int nodeSwitchIndex = 0;
 
@@ -140,7 +141,7 @@ public class SpawnAnNPCRewriter
     static void RewriteMethodInternal(
         ILContext il,
         List<SimulationNodeInfo> nodes,
-        out StateType localStateType,
+        out DynamicStateType localStateType,
         bool allowUnknownPatterns,
         out int nodeSwitchIndex,
         out bool possiblyNonDeterministic
@@ -1513,11 +1514,11 @@ public class SpawnAnNPCRewriteData
 
     public SimulationNodeInfo[] Nodes;
 
-    public StateType LocalStateType;
+    public DynamicStateType LocalStateType;
 
     public bool PossiblyNonDeterministic;
 
-    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, StateType localStateType, bool possiblyNonDeterministic)
+    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, DynamicStateType localStateType, bool possiblyNonDeterministic)
     {
         Method = method;
         Nodes = nodes;

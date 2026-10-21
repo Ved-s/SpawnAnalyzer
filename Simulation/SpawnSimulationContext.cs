@@ -87,7 +87,7 @@ public class SpawnSimulationContext
                     SimulationNodeTimeline thisNodeTimeline = thisNode.timelines[i];
                     if (runData.LocalStateType.Equals(localState!, thisNodeTimeline.localState) && prevTimelineState.Equals(thisNodeTimeline.timelineState))
                     {
-                        StateType? stackStateType = runData.Nodes[index].stackStateType;
+                        DynamicStateType? stackStateType = runData.Nodes[index].stackStateType;
 
                         if (stackStateType is null || stackStateType.Equals(stackState!, thisNodeTimeline.stackState!))
                         {
@@ -126,7 +126,7 @@ public class SpawnSimulationContext
             }
 
             object? stackStateClone = null;
-            StateType? stackStateType = runData.Nodes[index].stackStateType;
+            DynamicStateType? stackStateType = runData.Nodes[index].stackStateType;
             if (stackStateType is not null)
             {
                 stackStateClone = stackStateType.Clone(stackState!);
@@ -201,7 +201,7 @@ public class SpawnSimulationContext
     internal object GetLastNodeStackStateClone()
     {
         object state = populatedNodes[currentConnection!.startNode]!.timelines[currentConnection!.startNodeTimeline].stackState!;
-        StateType type = runData.Nodes[currentConnection!.startNode].stackStateType!;
+        DynamicStateType type = runData.Nodes[currentConnection!.startNode].stackStateType!;
 
         return type.Clone(state);
     }
@@ -327,11 +327,11 @@ public class SimulationNodeInfo
 {
     public int Offset;
 
-    public StateType? stackStateType;
+    public DynamicStateType? stackStateType;
 
     public SimulationNodeImpl node;
 
-    public SimulationNodeInfo(StateType? stackStateType, SimulationNodeImpl node)
+    public SimulationNodeInfo(DynamicStateType? stackStateType, SimulationNodeImpl node)
     {
         this.stackStateType = stackStateType;
         this.node = node;
@@ -354,8 +354,8 @@ public class SimulationTimelineState
     public bool? surfaceSpawn = null;
     public bool? dayTime = null;
 
-    static Func<object, object> CloneImpl = StateType.GenerateCloneMethod(typeof(SimulationTimelineState));
-    static Func<object, object, bool> EqImpl = StateType.GenerateEqMethod(typeof(SimulationTimelineState));
+    static Func<object, object> CloneImpl = DynamicStateType.GenerateCloneMethod(typeof(SimulationTimelineState));
+    static Func<object, object, bool> EqImpl = DynamicStateType.GenerateEqMethod(typeof(SimulationTimelineState));
 
     public SimulationTimelineState()
     {
@@ -493,7 +493,7 @@ public class NodeRollInfo
 {
     public bool dependsOnLuck = false;
 
-    static Func<object, object> CloneImpl = StateType.GenerateCloneMethod(typeof(NodeRollInfo));
+    static Func<object, object> CloneImpl = DynamicStateType.GenerateCloneMethod(typeof(NodeRollInfo));
 
     public NodeRollInfo()
     {
