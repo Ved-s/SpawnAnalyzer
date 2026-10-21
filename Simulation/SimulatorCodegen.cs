@@ -13,7 +13,7 @@ using OpCodes = Mono.Cecil.Cil.OpCodes;
 using ParameterAttributes = Mono.Cecil.ParameterAttributes;
 using ROpCodes = System.Reflection.Emit.OpCodes;
 
-namespace SpawnAnalyzer.Simulation.Test;
+namespace SpawnAnalyzer.Simulation;
 
 public class SimulatorCodegen
 {
@@ -67,13 +67,17 @@ public class SimulatorCodegen
         this.parameterHandler = parameterHandler;
     }
 
+    public void AnalyzeStack() {
+        Stack = StackAnalyzer.Analyze(IL);
+    }
+
     /// <summary>
     /// The method is ready for node codegen
     /// All local variables at this moment will be marked for saving
     /// </summary>
     public void PrepareForNodeCodegen()
     {
-        Stack = StackAnalyzer.Analyze(IL);
+        AnalyzeStack();
         TempLocals.ReleaseAll();
 
         LocalsToSave = IL.Body.Variables.Count;
@@ -89,6 +93,10 @@ public class SimulatorCodegen
 
         c.Emit(OpCodes.Ldnull);
         c.Emit(OpCodes.Stloc, NodeHitParamVar);
+
+        c.Emit(OpCodes.Ldarg, SimulatorParam);
+        c.Emit<Simulator>(OpCodes.Ldfld, "localState");
+        c.Emit(OpCodes.Stloc, localStateVar);
 
         c.Emit(OpCodes.Ldarga, entryParam);
         c.Emit<int?>(OpCodes.Call, "get_HasValue");
@@ -151,7 +159,7 @@ public class SimulatorCodegen
 
         float sizeKb = (float)size / 1024;
 
-        Console.WriteLine($"{Method.Name} simulator codegen finished, code size: {sizeKb:0.00}kb, instructions: {IL.Instrs.Count}, locals: {IL.Body.Variables.Count}, nodes: {Nodes.Count}");
+        Console.WriteLine($"{Method.Name} simulator codegen finished, code size: {sizeKb:0.00}kb, instructions: {IL.Instrs.Count}, locals: {LocalStateType!.Type.GetFields().Length}, nodes: {Nodes.Count}");
 
         DMDHack.SetNullOriginalMethod(Method);
 
@@ -160,7 +168,7 @@ public class SimulatorCodegen
         return newMethod.CreateDelegate<SimulatedMethod>();
     }
 
-    private void EmitNode(ILCursor c, SimulationNodeImpl node, NodeParameterInputBehavior pb, Span<StackValue> stackValuesToSave)
+    public void EmitNode(ILCursor c, SimulationNodeImpl node, NodeParameterInputBehavior pb, ReadOnlySpan<StackValue> stackValuesToSave)
     {
         ILLabel afterStopHandler = c.DefineLabel();
 
@@ -262,7 +270,7 @@ public class SimulatorCodegen
         Nodes.Add(info);
     }
 
-    private static MethodInfo GenerateStackSaveMethod(Span<StackValue> types, Type stackStateType)
+    private static MethodInfo GenerateStackSaveMethod(ReadOnlySpan<StackValue> types, Type stackStateType)
     {
         Type[] parameters = new Type[types.Length + 1];
 
@@ -337,7 +345,7 @@ public class SimulatorCodegen
                     c.Emit(OpCodes.Ldfld, IL.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
                     break;
 
-                case OpcodeValueAction.LoadRef:
+                case OpcodeValueAction.Store:
                     c.Emit(OpCodes.Ldflda, IL.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
 
                     Type localType = IL.Body.Variables[local].VariableType.ResolveReflection();
@@ -346,7 +354,7 @@ public class SimulatorCodegen
                     c.Emit(OpCodes.Call, genericStore);
                     break;
 
-                case OpcodeValueAction.Store:
+                case OpcodeValueAction.LoadRef:
                     c.Emit(OpCodes.Ldflda, IL.Import(Utils.GetFieldOrThrow(type.Type, DynamicStateType.GetAutoFieldName(local))));
                     break;
             }
@@ -402,7 +410,7 @@ public class SimulatorCodegen
     }
 }
 
-enum NodeParameterInputBehavior
+public enum NodeParameterInputBehavior
 {
     AlwaysNull,
     LoadFromParamVar,
@@ -461,12 +469,10 @@ public delegate FieldInfo ArgumentFieldResolver(int argIndex, string argName);
 
 public class StaticdataFieldNameParameterHandler : IParameterHandler
 {
-    readonly Type staticDataType;
     readonly ArgumentFieldResolver resolver;
 
-    public StaticdataFieldNameParameterHandler(Type staticDataType, ArgumentFieldResolver resolver)
+    public StaticdataFieldNameParameterHandler(ArgumentFieldResolver resolver)
     {
-        this.staticDataType = staticDataType;
         this.resolver = resolver;
     }
 

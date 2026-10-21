@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using Terraria;
 using Terraria.GameContent.Events;
 using Terraria.ID;
@@ -19,125 +20,148 @@ public static class TestMethods
         return typeof(TestMethods).GetMethod($"TestMethod{number}", (BindingFlags)(-1));
     }
 
-    public static TestNode[]? GetExpectedTestResults(int number)
+    public static TestBlock[]? GetExpectedTestResults(int number)
     {
-        return typeof(TestMethods).GetField($"TestMethod{number}ExpectedTestResults", (BindingFlags)(-1))?.GetValue(null) as TestNode[];
+        return typeof(TestMethods).GetField($"TestMethod{number}ExpectedTestResults", (BindingFlags)(-1))?.GetValue(null) as TestBlock[];
     }
 
-    public static void PrepareSimulationForTest(int number, SpawnSimulationContext ctx)
+    public static void PrepareSimulationForTest(int number, Simulator ctx)
     {
         typeof(TestMethods).GetMethod($"TestMethod{number}InitSimulation", (BindingFlags)(-1))?.Invoke(null, [ctx]);
     }
 
-    public class TestNode
+    public class TestBlock
     {
-        // (chance, spawns, next)
-        public (float, int[], int?)[] branches;
+        public int[] spawns;
 
-        public TestNode((float, int[], int?)[] branches)
+        public (float, int?)[] branches;
+        public TestBlock(int[] spawns, (float, int?)[] nextBlocks)
         {
-            this.branches = branches;
+            this.spawns = spawns;
+            this.branches = nextBlocks;
         }
     }
 
     [AttributeUsage(AttributeTargets.Method)]
     public class TestInlineAttribute : Attribute { }
 
-    public static TestNode[] TestMethod1ExpectedTestResults = [
-        new([ // 0
-            (1f/7, [], 1),
-            (6f/7, [], 2),
-        ]),
-        new([ // 1
-            (1f/10, [1], null),
-            (9f/10, [145], null),
-        ]),
-        new([ // 2
-            (1f/3, [143], null),
-            (2f/3, [], 3),
-        ]),
-        new([ // 3
-            (1f/2, [144], null),
-            (1f/2, [], null),
-        ]),
+    public static TestBlock[] TestMethod1ExpectedTestResults = [
+        /* 0 */ new([], [(1f/7, 1), (6f/7, 4)]),
+        /* 1 */ new([], [(1f/10, 2), (9f/10, 3)]),
+        /* 2 */ new([100], []),
+        /* 3 */ new([145], []),
+        /* 4 */ new([], [(1f/3, 5), (2f/3, 6)]),
+        /* 5 */ new([143], []),
+        /* 6 */ new([], [(1f/2, 7), (1f/2, null)]),
+        /* 7 */ new([144], []),
     ];
 
-    public static void TestMethod1(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod1(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
-        if (Main.rand.Next(7) == 0) // 0
+        // 0
+        if (Main.rand.Next(7) == 0)
         {
-            if (Main.rand.Next(10) == 0) // 1
+            // 1
+            if (Main.rand.Next(10) == 0)
             {
-                spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
+                // 2
+                spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 100, 0, 0f, 0f, 0f, 0f, 255);
                 return;
             }
+            // 3
 
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 145, 0, 0f, 0f, 0f, 0f, 255);
             return;
         }
+        // 4
         if (Main.rand.Next(3) == 0) // 2
         {
+            // 5
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 143, 0, 0f, 0f, 0f, 0f, 255);
             return;
         }
+        // 6
         if (Main.rand.Next(2) == 0) // 3
         {
+            // 7
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 144, 0, 0f, 0f, 0f, 0f, 255);
         }
         return;
     }
 
-    public static TestNode[] TestMethod2ExpectedTestResults = [
-        new([
-            (1f/4, [1], null),
-            (1f/4, [2], null),
-            (1f/4, [3], null),
-            (1f/4, [4], null),
+    
+    public static TestBlock[] TestMethod2ExpectedTestResults = [
+        /* 0 */ new([], [
+            (1f/4, 1),
+            (1f/4, 2),
+            (1f/4, 3),
+            (1f/4, 4),
         ]),
+        /* 1 */ new([101], []),
+        /* 2 */ new([102], []),
+        /* 3 */ new([103], []),
+        /* 4 */ new([104], []),
     ];
 
-    public static void TestMethod2(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod2(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
-        int id = Main.rand.Next(1, 5);
+        // 0
+        int id = Main.rand.Next(101, 105);
+
+        // 1 2 3 4
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, id, 0, 0f, 0f, 0f, 0f, 255);
         return;
     }
 
-    public static TestNode[] TestMethod3ExpectedTestResults = [
-        new([
-            (1f/8, [411], null),
-            (1f/8, [411], null),
-            (1f/8, [411], null),
-            (1f/8, [409], null),
-            (1f/8, [409], null),
-            (1f/8, [407], null),
-            (1f/8, [402], null),
-            (1f/8, [405], null),
+    
+    public static TestBlock[] TestMethod3ExpectedTestResults = [
+        /* 0 */ new([], [
+            (1f/8, 1),
+            (1f/8, 1),
+            (1f/8, 1),
+            (1f/8, 2),
+            (1f/8, 2),
+            (1f/8, 3),
+            (1f/8, 4),
+            (1f/8, 5),
         ]),
+        /* 1 */ new([411], []),
+        /* 2 */ new([409], []),
+        /* 3 */ new([407], []),
+        /* 4 */ new([402], []),
+        /* 5 */ new([405], []),
     ];
 
-    public static void TestMethod3(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod3(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
+        // 0
         int num8 = Utils.SelectRandom(Main.rand, [411, 411, 411, 409, 409, 407, 402, 405]);
         if (num8 != 0)
         {
+            // 1 2 3 4 5
             spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, num8, 1, 0f, 0f, 0f, 0f, 255);
             return;
         }
         return;
     }
 
-    public static TestNode[] TestMethod4ExpectedTestResults = [
-        new([
-            (1f/5, [524], null),
-            (1f/5, [524], null),
-            (1f/5, [530], null),
-            (1f/5, [528], null),
-            (1f/5, [532], null),
+    
+    public static TestBlock[] TestMethod4ExpectedTestResults = [
+        /* 0 */ new([], [
+            (1f/5, 1),
+            (1f/5, 2),
+            (1f/5, 3),
+            (1f/5, 4),
+            (1f/5, 5),
         ]),
+        /* 1 */ new([524], []),
+        /* 2 */ new([524], []),
+        /* 3 */ new([530], []),
+        /* 4 */ new([528], []),
+        /* 5 */ new([532], []),
     ];
 
-    public static void TestMethod4(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod4(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         List<int> list = new List<int>();
         if (spawner.ZoneCorrupt)
@@ -177,106 +201,141 @@ public static class TestMethods
         return;
     }
 
-    public static TestNode[] TestMethod5ExpectedTestResults = [
-        new([ // 0
-            (1f/7, [], 1),
-            (1f/7, [], 1),
-            (1f/7, [], 1),
-            (1f/7, [], 1),
-            (1f/7, [], 2),
-            (1f/7, [], 2),
-            (1f/7, [], 3),
+    public static TestBlock[] TestMethod5ExpectedTestResults = [
+        /*  0 */ new([], [
+            (1f/7, 1),
+            (1f/7, 2),
+            (1f/7, 2),
+            (1f/7, 3),
+            (1f/7, 3),
+            (1f/7, 3),
+            (1f/7, 3),
         ]),
-        new([ // 1
-            (1f/45, [395], null),
-            (44f/45, [], 7),
+
+        /*  1 */ new([], [
+            (1f/45, 4),
+            (44f/45, 5)
         ]),
-        new([ // 2
-            (1f/45, [395], null),
-            (44f/45, [], 6),
+
+        /*  2 */ new([], [
+            (1f/45, 4),
+            (44f/45, 10)
         ]),
-        new([ // 3
-            (1f/45, [395], null),
-            (44f/45, [], 4),
+
+        /*  3 */ new([], [
+            (1f/45, 4),
+            (44f/45, 14)
         ]),
-        new([ // 4
-            (1f/20, [395], null),
-            (19f/20, [], 5),
+
+        /*  4 */ new([395], []),
+
+        /*  5 */ new([], [
+            (1f/20, 6),
+            (19f/20, 7),
         ]),
-        new([ // 5
-            (1f/2, [390], null),
-            (1f/2, [386], null),
+        /*  6 */ new([395], []),
+        /*  7 */ new([], [
+            (1f/2, 8),
+            (1f/2, 9),
         ]),
-        new([ // 6
-            (1f/5, [382], null),
-            (1f/5, [382], null),
-            (1f/5, [381], null),
-            (1f/5, [381], null),
-            (1f/5, [388], null),
+
+        /*  8 */ new([390], []),
+        /*  9 */ new([386], []),
+
+        /* 10 */ new([], [
+            (1f/5, 11),
+            (1f/5, 11),
+            (1f/5, 12),
+            (1f/5, 12),
+            (1f/5, 13),
         ]),
-        new([ // 6
-            (1f/3, [385], null),
-            (1f/3, [389], null),
-            (1f/3, [383], null),
+        /* 11 */ new([382], []),
+        /* 12 */ new([381], []),
+        /* 13 */ new([388], []),
+
+        /* 14 */ new([], [
+            (1f/3, 15),
+            (1f/3, 16),
+            (1f/3, 17),
         ]),
+        /* 15 */ new([385], []),
+        /* 16 */ new([389], []),
+        /* 17 */ new([383], []),
     ];
 
-    public static void TestMethod5(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod5(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
+        // 0
         int num12 = 0;
-        int num13 = Main.rand.Next(7); // 0 
-        if (Main.rand.Next(45) == 0) // 1 2 3
+        int num13 = Main.rand.Next(7);
+
+        // 1 (6) 2 (4, 5) 3 (0, 1, 2, 3)
+        if (Main.rand.Next(45) == 0)
         {
+            // 4
             num12 = 395;
         }
         else if (num13 >= 6)
         {
-            if (Main.rand.Next(20) == 0)  // 4
+            // 5
+            if (Main.rand.Next(20) == 0)
             {
+                // 6
                 num12 = 395;
             }
             else
             {
-                int num14 = Main.rand.Next(2);  // 5
+                // 7
+                int num14 = Main.rand.Next(2);
                 if (num14 == 0)
                 {
+                    // 8
                     num12 = 390;
                 }
                 if (num14 == 1)
                 {
+                    // 9
                     num12 = 386;
                 }
             }
         }
         else if (num13 >= 4)
         {
-            int num15 = Main.rand.Next(5); // 6
-            if (num15 < 2)
+            // 10
+            int num15 = Main.rand.Next(5);
+            if (num15 < 2) // 0, 1
             {
+                // 11
                 num12 = 382;
             }
-            else if (num15 < 4)
+            else if (num15 < 4) // 2, 3
             {
+                // 12
                 num12 = 381;
             }
-            else
+            else // 4
             {
+                // 13
                 num12 = 388;
             }
         }
         else
         {
-            int num16 = Main.rand.Next(3); // 7
+            // 14
+            int num16 = Main.rand.Next(3);
             if (num16 == 0)
             {
+                // 15
                 num12 = 385;
             }
             if (num16 == 1)
             {
+                // 16
                 num12 = 389;
             }
             if (num16 == 2)
             {
+                // 17
                 num12 = 383;
             }
         }
@@ -287,6 +346,7 @@ public static class TestMethods
         }
     }
 
+    /*
     public static TestNode[] TestMethod6ExpectedTestResults = [
         new([ // 0
             (1f/3, [], 1),
@@ -310,7 +370,7 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod6(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod6(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (Main.rand.Next(3) == 0) // 0
         {
@@ -354,7 +414,7 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod7(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod7(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (Main.rand.Next(3) == 0) // 0
         {
@@ -396,7 +456,7 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod8(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod8(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (spawner.RollLuck(2) == 0) // 0
         {
@@ -449,7 +509,7 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod9(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod9(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (Main.rand.Next(100) < 30) // 0
         {
@@ -464,9 +524,9 @@ public static class TestMethods
         }
     }
 
-    public static void TestMethod10InitSimulation(SpawnSimulationContext ctx)
+    public static void TestMethod10InitSimulation(Simulator ctx)
     {
-        ctx.chances.dayTimeChance = 0.5f;
+        ((SpawnAnNpcStaticData)ctx.staticSimData).chances.dayTimeChance = 0.5f;
     }
 
     public static TestNode[] TestMethod10ExpectedTestResults = [
@@ -484,7 +544,7 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod10(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod10(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (spawner.dayTime        // 0
          && Main.rand.Next(3) == 0 // 1
@@ -559,7 +619,7 @@ public static class TestMethods
         }
     }
 
-    public static void TestMethod11(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod11(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         int v = Main.rand.Next(2); // 0
 
@@ -569,7 +629,7 @@ public static class TestMethods
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, x + y, 0, 0f, 0f, 0f, 0f, 255);
     }
 
-    public static void TestMethod12(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod12(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (spawner.RollLuck(NPC.goldCritterChance) == 0)
         {
@@ -590,7 +650,7 @@ public static class TestMethods
         }
     }
 
-    public static void TestMethod13(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod13(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (Main.rand.Next(5) == 0)
         {
@@ -600,10 +660,10 @@ public static class TestMethods
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 230, 0, 0f, 0f, 0f, 0f, 255);
     }
 
-    public static void TestMethod14InitSimulation(SpawnSimulationContext ctx)
+    public static void TestMethod14InitSimulation(Simulator ctx)
     {
         Main.tenthAnniversaryWorld = true;
-        ctx.spawner.luck = 0;
+        ((SpawnAnNpcStaticData)ctx.staticSimData).spawner.luck = 0;
     }
 
     public static TestNode[] TestMethod14ExpectedTestResults = [
@@ -625,22 +685,24 @@ public static class TestMethods
         ]),
     ];
 
-    public static void TestMethod14(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, bool xRange, int target)
+    public static void TestMethod14(NPC.Spawner spawner, int spawnTileX, int spawnTileY, int spawnTileType, int spawnWallType, bool xRange, int target)
     {
         if (Main.rand.Next(2) == 0) {} // 0
-        /*
-            if (NPCID.FromNetId(Type) == 1)
-            {
-                if (this.RollLuck(180) == 0) // 1
-                {
-                    Type = -4;
-                }
-                if (Main.tenthAnniversaryWorld && this.RollLuck(180) == 0) // 2, 3 when Type = -4
-                {
-                    Type = 667;
-                }
-            }
-        */
+        //
+        //  if (NPCID.FromNetId(Type) == 1)
+        //  {
+        //      if (this.RollLuck(180) == 0) // 1
+        //      {
+        //          Type = -4;
+        //      }
+        //      if (Main.tenthAnniversaryWorld && this.RollLuck(180) == 0) // 2, 3 when Type = -4
+        //      {
+        //          Type = 667;
+        //      }
+        //  }
+        //
         spawner.SpawnNPC(spawnTileX * 16 + 8, spawnTileY * 16, 1, 0, 0f, 0f, 0f, 0f, 255);
     }
+
+    */
 }

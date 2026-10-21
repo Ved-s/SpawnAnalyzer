@@ -86,6 +86,9 @@ public class SpawnAnalyzer
 
         HackMonoModDynamicMethodNRE();
 
+        SelfTest(null);
+        Environment.Exit(1);
+
         ImplInitThread = new Thread(() =>
         {
             Stopwatch sw = Stopwatch.StartNew();
@@ -184,75 +187,85 @@ public class SpawnAnalyzer
 
     public static bool SelfTest(int? specificTest = null, bool printNodes = false, bool ilprintout = false, bool printChances = false)
     {
-        static bool MatchNode(int testid, int testindex, int simindex, int simtimeline, TestMethods.TestNode[] testNodes, List<SimulationNode?> simNodes, bool report, int depth, ref int faildepth)
+        static bool MatchBlock(
+            int testid,
+            int testindex,
+            int resultindex,
+            TestMethods.TestBlock[] testBlocks,
+            SimulationBlock[] blocks,
+            bool report,
+            int depth,
+            ref int faildepth
+        )
         {
-            TestMethods.TestNode testnode = testNodes[testindex];
-            SimulationNode? simnode = simNodes[simindex];
+            TestMethods.TestBlock testBlock = testBlocks[testindex];
+            SimulationBlock block = blocks[resultindex];
 
-            if (simnode is null)
+            var result = block.results as SpawnAnNpcBlockResult;
+
+            int gotSpawns = result?.Spawns?.Count ?? 0;
+            if (gotSpawns != testBlock.spawns.Length)
             {
+
                 faildepth = depth;
                 if (report)
-                    Console.WriteLine($"Self-test {testid} fail at results: Expected simulation node {simindex} to be populated");
+                    Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} result {resultindex}) Expected {gotSpawns} spawns, got {testBlock.spawns.Length}");
                 return false;
             }
 
-            var branches = simnode.timelines[simtimeline].branches.ToList();
+            for (int k = 0; k < gotSpawns; k++)
+            {
+                if (result!.Spawns![k].npcId != testBlock.spawns[k])
+                {
+                    faildepth = depth;
+                    if (report)
+                        Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} result {resultindex}) Expected spawn {k} to be {testBlock.spawns[k]}, got {result.Spawns[k].npcId}");
+                    return false;
+                }
+            }
 
-            if (branches.Count != testnode.branches.Length)
+            var remainingBranches = block.nextBranches.ToList();
+
+            if (block.nextBranches.Length != testBlock.branches.Length)
             {
                 faildepth = depth;
                 if (report)
-                    Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} sim {simindex}/{simtimeline}) Expected {testnode.branches.Length} branches, got {branches.Count}");
+                    Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} result {resultindex}) Expected {testBlock.branches.Length} branches, got {block.nextBranches.Length}");
                 return false;
             }
 
-            for (int i = 0; i < testnode.branches.Length; i++)
+            for (int i = 0; i < testBlock.branches.Length; i++)
             {
-                (float, int[], int?) branch = testnode.branches[i];
+                var (branchChance, brahchNextIndex) = testBlock.branches[i];
 
-                int? foundIndex = null;
+                int? foundMatchingBranch = null;
 
                 int maxFailDepth = 0;
                 int? maxFailIndex = null;
 
-                for (int j = 0; j < branches.Count; j++)
+                for (int j = 0; j < remainingBranches.Count; j++)
                 {
-                    var n = branches[j];
+                    var nextBranch = remainingBranches[j];
 
-                    if (branch.Item1 - 0.005f > n.info.chance || branch.Item1 + 0.005f < n.info.chance)
+                    if (branchChance - 0.005f > nextBranch.chance || branchChance + 0.005f < nextBranch.chance)
                         continue;
 
-                    if (branch.Item2.Length > 0)
+                    if (!brahchNextIndex.HasValue)
                     {
-                        if ((n.spawns?.Count ?? 0) != branch.Item2.Length)
-                        {
-                            continue;
-                        }
+                        var nextBlock = blocks[nextBranch.nextBlock];
+                        var nextBlockResult = nextBlock.results as SpawnAnNpcBlockResult;
 
-                        bool spawnsOk = true;
-                        for (int k = 0; k < n.spawns!.Count; k++)
-                        {
-                            if (n.spawns[k].npcId != branch.Item2[k])
-                            {
-                                spawnsOk = false;
-                                break;
-                            }
-                        }
-                        if (!spawnsOk)
+                        if (nextBlock.nextBranches.Length != 0)
+                            continue;
+
+                        if (nextBlockResult?.Spawns?.Count is > 0)
                             continue;
                     }
-
-                    if (branch.Item3 is not null)
+                    else
                     {
-                        if (n.nextNode is null)
-                        {
-                            continue;
-                        }
-
                         int newfaildepth = 0;
 
-                        if (!MatchNode(testid, branch.Item3.Value, n.nextNode.node, n.nextNode.timeline, testNodes, simNodes, false, depth + 1, ref newfaildepth))
+                        if (!MatchBlock(testid, brahchNextIndex.Value, nextBranch.nextBlock, testBlocks, blocks, false, depth + 1, ref newfaildepth))
                         {
                             if (newfaildepth > maxFailDepth)
                             {
@@ -263,28 +276,28 @@ public class SpawnAnalyzer
                         }
                     }
 
-                    foundIndex = j;
+                    foundMatchingBranch = j;
                     break;
                 }
 
-                if (foundIndex is not null)
+                if (foundMatchingBranch is not null)
                 {
-                    branches.RemoveAt(foundIndex.Value);
+                    remainingBranches.RemoveAt(foundMatchingBranch.Value);
                 }
                 else
                 {
-                    if (maxFailIndex is null)
+                    if (maxFailIndex is null || brahchNextIndex is null)
                     {
                         faildepth = depth;
                         if (report)
-                            Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} sim {simindex}/{simtimeline}) Failed to match test branch {i}");
+                            Console.WriteLine($"Self-test {testid} fail at results: Node (test {testindex} result {resultindex}) Failed to match test branch {i}");
                         return false;
                     }
                     else
                     {
-                        var n = branches[maxFailIndex.Value];
+                        var n = remainingBranches[maxFailIndex.Value];
                         if (report)
-                            MatchNode(testid, branch.Item3!.Value, n.nextNode!.node, n.nextNode.timeline, testNodes, simNodes, true, depth + 1, ref faildepth);
+                            MatchBlock(testid, brahchNextIndex.Value, n.nextBlock, testBlocks, blocks, true, depth + 1, ref faildepth);
                         faildepth = depth;
                         return false;
                     }
@@ -320,22 +333,34 @@ public class SpawnAnalyzer
             var spawner = (NPC.Spawner)FormatterServices.GetSafeUninitializedObject(typeof(NPC.Spawner));
 #pragma warning restore SYSLIB0050 // Type or member is obsolete
 
-            int x = 100;
-            int y = 100;
-            int tileType = TileID.Grass;
-            int wallType = WallID.None;
+            SpawnAnNpcStaticData staticData = new()
+            {
+                spawner = spawner,
+                spawnTileX = 100,
+                spawnTileY = 100,
+                spawnTileType = TileID.Grass,
+                spawnWallType = WallID.None,
+                xRange = false,
+                target = 0,
+                chances = SpawnerChances.WithValuesFrom(spawner)
+            };
 
-            SpawnerChances chances = SpawnerChances.WithValuesFrom(spawner);
+            Simulator sim = new(
+                staticData,
+                d.Method,
+                d.Nodes,
+                d.LocalStateType,
+                SpawnAnNpcTimelineState.StateType,
+                () => new SpawnAnNpcBlockResult()
+            );
 
-            SpawnSimulationContext ctx = new SpawnSimulationContext(d, chances, spawner, x, y, tileType, wallType, false);
-
-            TestMethods.PrepareSimulationForTest(i, ctx);
+            TestMethods.PrepareSimulationForTest(i, sim);
 
             SimulationResult simulationResult;
 
             try
             {
-                simulationResult = ctx.Simulate() ?? throw new NullReferenceException("Simulate returned null");
+                simulationResult = sim.Simulate();
             }
             catch (Exception e)
             {
@@ -346,78 +371,29 @@ public class SpawnAnalyzer
 
             if (printNodes)
             {
-                for (int j = 0; j < simulationResult.nodes.Count; j++)
+                for (int j = 0; j < simulationResult.blocks.Length; j++)
                 {
-                    var node = simulationResult.nodes[j];
-                    if (node is null)
-                    {
-                        continue;
-                    }
+                    var block = simulationResult.blocks[j];
+                    var result = block.results as SpawnAnNpcBlockResult;
 
-                    SimulationNodeInfo nodeInfo = d.Nodes[j];
-                    if (simulationResult.startNode == j)
-                    {
-                        Console.WriteLine($"Node {j} [{nodeInfo.node.GetType().Name} at IL_{nodeInfo.Offset:x4}] (start): ");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Node {j} [{nodeInfo.node.GetType().Name} at IL_{nodeInfo.Offset:x4}]: ");
-                    }
+                    Console.WriteLine($"Block {j}:");
 
-                    for (int t = 0; t < node.timelines.Count; t++)
+                    if (result?.Spawns is not null)
                     {
-
-                        Console.WriteLine($"  Timeline {t}:");
-                        var timeline = node.timelines[t];
-                        foreach (var branch in timeline.branches)
+                        foreach (var spawn in result.Spawns)
                         {
-                            string ps = $"   [{branch.info.chance * 100:.0}%] -> ";
-                            Console.Write(ps);
-
-                            bool firstline = true;
-
-                            if (branch.spawns is not null)
-                            {
-                                foreach (var spawn in branch.spawns)
-                                {
-                                    if (!firstline)
-                                    {
-                                        Console.WriteLine(",");
-                                        for (int k = 0; k < ps.Length; k++)
-                                        {
-                                            Console.Write(' ');
-                                        }
-                                    }
-                                    firstline = false;
-                                    Console.Write($"Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.pos}");
-                                }
-                            }
-
-                            if (branch.nextNode is not null)
-                            {
-                                if (!firstline)
-                                {
-                                    Console.WriteLine(",");
-                                    for (int k = 0; k < ps.Length; k++)
-                                    {
-                                        Console.Write(' ');
-                                    }
-                                }
-                                firstline = false;
-
-                                Console.Write($"Node {branch.nextNode!.node}/{branch.nextNode!.timeline}");
-                            }
-
-                            if (firstline)
-                            {
-                                Console.Write($"Nothing");
-                            }
-                            Console.WriteLine();
+                            Console.WriteLine($"  Spawn {NPCID.Search.GetName(spawn.npcId)} [{spawn.npcId}] @ {spawn.pos}");
                         }
+                    }
+
+                    foreach (var branch in block.nextBranches)
+                    {
+                        Console.WriteLine($"  Branch {branch.chance * 100:.0}% -> block {branch.nextBlock}");
                     }
                 }
             }
 
+            /*
             if (printChances)
             {
                 AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
@@ -460,8 +436,9 @@ public class SpawnAnalyzer
                     Console.WriteLine();
                 }
             }
+            */
 
-            TestMethods.TestNode[]? testData = TestMethods.GetExpectedTestResults(i);
+            TestMethods.TestBlock[]? testData = TestMethods.GetExpectedTestResults(i);
 
             if (testData is null)
             {
@@ -471,7 +448,7 @@ public class SpawnAnalyzer
 
 
             int faildepth = 0;
-            if (!MatchNode(i, 0, simulationResult.startNode, 0, testData, simulationResult.nodes, true, 0, ref faildepth))
+            if (!MatchBlock(i, 0, 0, testData, simulationResult.blocks, true, 0, ref faildepth))
             {
                 ok = false;
                 continue;
@@ -558,10 +535,10 @@ public class SpawnAnalyzer
     delegate NPC orig_NPC_Spawner_SpawnNPC(NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static NPC On_NPC_Spawner_SpawnNPC(orig_NPC_Spawner_SpawnNPC orig, NPC.Spawner self, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is { } ctx)
+        if (Simulator.CurrentlyRunningSimulation is { staticSimData: SpawnAnNpcStaticData staticData } sim && ReferenceEquals(staticData.spawner, self))
         {
-            ctx.NonDeterministic = true;
-            ctx.AddCurrentConnectionSpawn(new()
+            sim.NonDeterministic = true;
+            ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).AddCurrentConnectionSpawn(new()
             {
                 pos = new(X, Y),
                 npcId = Type,
@@ -576,10 +553,10 @@ public class SpawnAnalyzer
     delegate int orig_NPC_NewNPC(IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target);
     static int On_NPC_NewNPC(orig_NPC_NewNPC orig, IEntitySource source, int X, int Y, int Type, int Start, float ai0, float ai1, float ai2, float ai3, int Target)
     {
-        if (SpawnSimulationContext.CurrentlySimulatingContext is { } ctx)
+        if (Simulator.CurrentlyRunningSimulation is { staticSimData: SpawnAnNpcStaticData } sim)
         {
-            ctx.NonDeterministic = true;
-            ctx.AddCurrentConnectionSpawn(new()
+            sim.NonDeterministic = true;
+            ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).AddCurrentConnectionSpawn(new()
             {
                 pos = new(X, Y),
                 npcId = Type,
@@ -593,14 +570,14 @@ public class SpawnAnalyzer
 
     static void IL_UnifiedRandom_InternalSample(ILContext il)
     {
-        static void RandomCalledOnSimulation(SpawnSimulationContext ctx)
+        static void RandomCalledOnSimulation(Simulator ctx)
         {
             ctx.NonDeterministic = true;
 
             // Maybe report it in the console?
         }
 
-        Action<SpawnSimulationContext> RandomCalledOnSimulationDelegate = RandomCalledOnSimulation;
+        Action<Simulator> RandomCalledOnSimulationDelegate = RandomCalledOnSimulation;
         MethodInfo RandomCalledOnSimulationMethod = RandomCalledOnSimulationDelegate.Method;
 
         ILCursor c = new(il);
@@ -609,7 +586,7 @@ public class SpawnAnalyzer
 
         ILLabel contextHook = c.DefineLabel();
 
-        PropertyInfo prop = Utils.GetPropertyOrThrow(typeof(SpawnSimulationContext), nameof(SpawnSimulationContext.CurrentlySimulatingContext));
+        PropertyInfo prop = Utils.GetPropertyOrThrow(typeof(Simulator), nameof(Simulator.CurrentlyRunningSimulation));
 
         // Quickly call and jump to real code when null
         c.Emit(OpCodes.Call, prop.GetMethod!);

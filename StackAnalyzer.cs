@@ -269,6 +269,11 @@ public class StackAnalyzer
                         FieldInfo fieldInfo = field.ResolveReflection();
                         value = new(new StackValueOrigin.Field(fieldInfo), fieldInfo.FieldType, SimpleTypeFromSystemType(fieldInfo.FieldType));
                     }
+                    else if (instr.MatchLdsflda(out field) || instr.MatchLdflda(out field))
+                    {
+                        FieldInfo fieldInfo = field.ResolveReflection();
+                        value = new(new StackValueOrigin.Field(fieldInfo), fieldInfo.FieldType.MakeByRefType(), SimpleType.Reference);
+                    }
                     else if (instr.MatchLdarg(out int arg) || instr.MatchLdarga(out arg))
                     {
                         ParameterDefinition? param = null;

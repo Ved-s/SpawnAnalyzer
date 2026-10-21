@@ -10,6 +10,7 @@ using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
+using SpawnAnalyzer.UI.Tabs;
 using Terraria;
 using Terraria.ID;
 using Terraria.Utilities;
@@ -56,8 +57,8 @@ public class SpawnAnNPCRewriter
         ..StindOpcodes,
         ..StelemOpcodes
     ];
-    
-    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true, bool printoutAfter = false)
+
+    public static SpawnAnNPCRewriteData RewriteMethod(MethodInfo? methodOverride = null, bool allowUnknownPatterns = true, bool debug = false)
     {
         MethodInfo method = methodOverride ?? Utils.GetMethodOrThrow<NPC.Spawner>("SpawnAnNPC",
             [
@@ -72,97 +73,13 @@ public class SpawnAnNPCRewriter
 
         DynamicMethodDefinition dmd = new(method);
 
-        List<SimulationNodeInfo> nodes = [];
-
-        ILContext il = new(dmd.Definition);
-
-        DynamicStateType ls = null!;
-
-        int nodeSwitchIndex = 0;
-
-        bool possiblyNonDeterministic = false;
-
-        il.Invoke((il) => RewriteMethodInternal(il, nodes, out ls, allowUnknownPatterns, out nodeSwitchIndex, out possiblyNonDeterministic));
-
-        if (il.Instrs[nodeSwitchIndex].Operand is Instruction[] nodeInstrs)
+        SimulatorCodegen codegen = new(dmd, new StaticdataFieldNameParameterHandler(SpawnAnNpcStaticData.ProvideArg))
         {
-            for (int i = 0; i < nodeInstrs.Length; i++)
-            {
-                nodes[i].Offset = nodeInstrs[i].Offset;
-            }
-        }
-
-        if (printoutAfter)
-        {
-            for (int i = 0; i < nodes.Count; i++)
-            {
-                var node = nodes[i];
-                Console.WriteLine($"nodes[{i}] = {node.node.GetType().Name} at IL_{node.Offset:x4}");
-            }
-
-            StackAnalysis? stack = null;
-            Exception? stackException = null;
-            try
-            {
-                stack = StackAnalyzer.Analyze(il);
-            }
-            catch (Exception e)
-            {
-                stackException = e;
-            }
-
-            il.FancyPrintout(stack?.instructions);
-
-            if (stackException is not null)
-            {
-                Console.WriteLine($"Stack analysis exception: {stackException}");
-            }
-        }
-
-        int size = 0;
-        foreach (Instruction instr in il.Instrs)
-        {
-            size += instr.GetSize();
-        }
-
-        float sizeKb = (float)size / 1024;
-
-        Console.WriteLine($"SpawnAnNPC rewrite finished, code size: {sizeKb:0.00}kb, instructions: {il.Instrs.Count}, locals: {il.Body.Variables.Count}, nodes: {nodes.Count}");
-
-        DMDHack.SetNullOriginalMethod(dmd);
-
-        MethodInfo newMethod = dmd.Generate();
-
-        var dg = newMethod.CreateDelegate<RewrittenSpawnAnNPC>();
-
-        return new SpawnAnNPCRewriteData(dg, nodes.ToArray(), ls, possiblyNonDeterministic);
-    }
-
-    static void RewriteMethodInternal(
-        ILContext il,
-        List<SimulationNodeInfo> nodes,
-        out DynamicStateType localStateType,
-        bool allowUnknownPatterns,
-        out int nodeSwitchIndex,
-        out bool possiblyNonDeterministic
-    )
-    {
-        ParameterDefinition entryParam = new("startFromNode", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(int?)));
-        ParameterDefinition contextParam = new("context", Mono.Cecil.ParameterAttributes.None, il.Import(typeof(SpawnSimulationContext)));
-
-        VariableDefinition stopVar = new(il.Import(typeof(bool)));
-        VariableDefinition randomParamVar = new(il.Import(typeof(object)));
-        VariableDefinition stackStateVar = new(il.Import(typeof(object)));
-        VariableDefinition tempIntVar = new(il.Import(typeof(int)));
-        VariableDefinition tempNullBoolVar = new(il.Import(typeof(bool?)));
+            DebugPrintout = debug
+        };
 
         HashSet<FieldInfo> allowFields = new();
         HashSet<MethodBase> allowMethods = [
-            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.NodeHit)),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.ExitNodeHit_SpawnNPC)),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.ExitNodeHit_SpawnOnPlayer)),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.GetLastNodeStackStateClone)),
-            Utils.GetMethodOrThrow<SpawnSimulationContext>(nameof(SpawnSimulationContext.GetCurrentTimelineState)),
 
             Utils.GetMethodOrThrow<NPC>("AnyNPCs"),
             Utils.GetMethodOrThrow<NPC>("CountNPCS"),
@@ -176,34 +93,28 @@ public class SpawnAnNPCRewriter
             typeof(Rectangle).GetConstructor([typeof(int), typeof(int), typeof(int), typeof(int)])!,
         ];
 
-        ReplaceGetZombieSetings(il);
-        RemoveDefaultTargetSet(il);
-        PatchFindNearbyBook(il, allowMethods);
-        PatchGnomeInlineExpr(il);
+        ReplaceGetZombieSetings(codegen.IL);
+        RemoveDefaultTargetSet(codegen.IL);
+        PatchFindNearbyBook(codegen.IL, allowMethods);
+        PatchGnomeInlineExpr(codegen.IL);
 
-        InlineCalls(il);
+        InlineCalls(codegen.IL);
 
-        PatchSlimes(il);
-        il.Instrs.FillWithFakeILOffsets();
+        PatchSlimes(codegen.IL);
 
-        StackAnalysis stack = StackAnalyzer.Analyze(il);
+        codegen.IL.Instrs.FillWithFakeILOffsets();
+        codegen.PrepareForNodeCodegen();
 
-        ILLabel mainEntryLabel = il.DefineLabel();
-        List<ILLabel> entryJumps = [];
+        SimulationLuckMethods luck = new()
+        {
+            GetLuck = sim => ((SpawnAnNpcStaticData)sim.staticSimData).spawner.luck,
+            OnLuckBasedBranchHit = sim => ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).BranchDependsOnLuck = true,
 
-        NodeRewriter nodeRewriter = new(
-            nodes, contextParam,
-            stopVar, randomParamVar, stackStateVar, tempIntVar, tempNullBoolVar,
-            entryJumps,
-            allowFields, allowMethods,
-            stack
-        );
+        };
 
-        ILCursor c = new(il);
+        RandomCallNodeCodegen.RewriteRandomCalls(codegen, allowUnknownPatterns, luck);
 
-        nodeRewriter.RewriteNodes(c, allowUnknownPatterns);
-
-        c.Index = 0;
+        ILCursor c = new(codegen.IL);
 
         if (c.TryGotoNext(
             x => x.MatchLdsfld<Main>("rand")
@@ -212,45 +123,21 @@ public class SpawnAnNPCRewriter
             throw new Exception($"Found Main.rand reference at IL_{c.Next!.Offset:x4}, should have none left");
         }
 
-        RewriteSpawnNPCCalls(c, contextParam, stack);
-        RewriteSpawnOnPlayerCalls(c, contextParam, stack);
+        RewriteSpawnNPCCalls(codegen);
+        RewriteSpawnOnPlayerCalls(codegen);
 
-        RewriteOldArgAccessors(c, contextParam);
-        possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, stack, false);
+        codegen.AnalyzeStack();
 
-        localStateType = LocalStateInfo.RewriteLocalState(il, contextParam);
+        bool possiblyNonDeterministic = !VerifyNoSideEffects(c, allowFields, allowMethods, codegen.Stack, false);
 
-        c.Index = 0;
+        SimulatedMethod simmethod = codegen.GenerateMethod();
 
-        c.Emit(OpCodes.Ldnull);
-        c.Emit(OpCodes.Stloc, randomParamVar);
-
-        c.Emit(OpCodes.Ldarga, entryParam);
-        c.Emit<int?>(OpCodes.Call, "get_HasValue");
-        c.Emit(OpCodes.Brfalse, mainEntryLabel);
-
-        c.Emit(OpCodes.Ldarga, entryParam);
-        c.Emit<int?>(OpCodes.Call, "get_Value");
-        nodeSwitchIndex = c.Index;
-
-        c.Emit(OpCodes.Switch, entryJumps.ToArray());
-        c.Emit(OpCodes.Ret);
-        c.MarkLabel(mainEntryLabel);
-
-        il.Method.Parameters.Clear();
-        il.Method.Parameters.Add(entryParam);
-        il.Method.Parameters.Add(contextParam);
-
-        il.Body.Variables.Add(stopVar);
-        il.Body.Variables.Add(randomParamVar);
-        il.Body.Variables.Add(stackStateVar);
-        il.Body.Variables.Add(tempIntVar);
-        il.Body.Variables.Add(tempNullBoolVar);
+        return new(simmethod, codegen.Nodes.ToArray(), codegen.LocalStateType!, possiblyNonDeterministic);
     }
 
-    static void RewriteSpawnNPCCalls(ILCursor c, ParameterDefinition contextParam, StackAnalysis stack)
+    static void RewriteSpawnNPCCalls(SimulatorCodegen codegen)
     {
-        c.Index = 0;
+        ILCursor c = new(codegen.IL);
 
         ulong unknownSpawns = 0;
         ulong knownSpawns = 0;
@@ -260,7 +147,7 @@ public class SpawnAnNPCRewriter
         ))
         {
             MethodReference spawnNpcMethod = (MethodReference)c.Next!.Operand;
-            InstructionStackInfo stackInfo = stack.LookupInstruction(c.Next, out _)
+            InstructionStackInfo stackInfo = codegen.Stack!.LookupInstruction(c.Next, out _)
                 ?? throw new InvalidOperationException("Stack analysis out of date or invalid");
 
             int restParams = spawnNpcMethod.Parameters.Count;
@@ -275,7 +162,7 @@ public class SpawnAnNPCRewriter
                 throw new InvalidOperationException($"Invalid this param value source (at IL_{thisLoadInstr.Offset:x4}) for random call at IL_{c.Next.Offset:x4}");
 
             thisLoadInstr.OpCode = OpCodes.Ldarg;
-            thisLoadInstr.Operand = contextParam;
+            thisLoadInstr.Operand = codegen.SimulatorParam;
 
             if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 6, out _,
                 x => x.MatchLdcI4(out _),
@@ -303,7 +190,8 @@ public class SpawnAnNPCRewriter
                 c.Emit(OpCodes.Pop);
                 c.Remove();
             }
-            c.Emit<SpawnSimulationContext>(OpCodes.Call, nameof(SpawnSimulationContext.ExitNodeHit_SpawnNPC));
+
+            c.Emit<SpawnAnNpcHelpers>(OpCodes.Call, nameof(SpawnAnNpcHelpers.SpawnNPC));
 
             if (c.Next.MatchPop())
             {
@@ -350,9 +238,9 @@ public class SpawnAnNPCRewriter
         }
     }
 
-    static void RewriteSpawnOnPlayerCalls(ILCursor c, ParameterDefinition contextParam, StackAnalysis stack)
+    static void RewriteSpawnOnPlayerCalls(SimulatorCodegen codegen)
     {
-        c.Index = 0;
+        ILCursor c = new(codegen.IL);
 
         while (c.TryGotoNext(
             MoveType.AfterLabel,
@@ -360,7 +248,7 @@ public class SpawnAnNPCRewriter
         ))
         {
             Instruction instr = c.Next!;
-            InstructionStackInfo stackinfo = stack.LookupInstruction(instr, out _)!;
+            InstructionStackInfo stackinfo = codegen.Stack!.LookupInstruction(instr, out _)!;
 
             StackValue targetValue = stackinfo.inValues[stackinfo.inValues.Count - 6];
 
@@ -380,7 +268,7 @@ public class SpawnAnNPCRewriter
             }
 
             targetProducer.OpCode = OpCodes.Ldarg;
-            targetProducer.Operand = contextParam;
+            targetProducer.Operand = codegen.SimulatorParam;
 
             if (SpawnAnalyzer.MatchInstructions(c.Context, c.Index - 4, out _,
                 x => x.MatchLdcR4(out _),
@@ -402,54 +290,7 @@ public class SpawnAnNPCRewriter
 
             c.Remove();
 
-            c.Emit<SpawnSimulationContext>(OpCodes.Call, nameof(SpawnSimulationContext.ExitNodeHit_SpawnOnPlayer));
-        }
-    }
-
-    static void RewriteOldArgAccessors(ILCursor c, ParameterDefinition contextParam)
-    {
-        c.Index = 0;
-
-        int arg = 0;
-        while (c.TryGotoNext(
-            MoveType.AfterLabel,
-            x => x.MatchLdarg(out arg)
-        ))
-        {
-            if (arg < 0)
-            {
-                continue;
-            }
-
-            string? field = arg switch
-            {
-                0 => "spawner",
-                1 => "spawnTileX",
-                2 => "spawnTileY",
-                3 => "spawnTileType",
-                4 => "spawnWallType",
-                5 => "xRange",
-                _ => null
-            };
-
-            if (field is null)
-            {
-                if (arg == 6)
-                {
-                    c.Next!.OpCode = OpCodes.Ldsfld;
-                    c.Next!.Operand = c.IL.Import(Utils.GetFieldOrThrow<Main>("myPlayer"));
-                    continue;
-                }
-                throw new NotImplementedException($"ldarg {arg} at IL_{c.Next!.Offset:x4}");
-            }
-
-            Instruction oldInstruction = c.Next!;
-
-            c.Emit(OpCodes.Ldarg, contextParam);
-            c.Emit<SpawnSimulationContext>(OpCodes.Ldfld, field);
-
-            c.Next = oldInstruction;
-            c.Remove();
+            c.Emit<SpawnAnNpcHelpers>(OpCodes.Call, nameof(SpawnAnNpcHelpers.SpawnOnPlayer));
         }
     }
 
@@ -467,12 +308,25 @@ public class SpawnAnNPCRewriter
             {
                 MethodBase resolved = method.ResolveReflection();
 
+                bool okMethod = false;
+                foreach (var p in method.Parameters) {
+                    if (p.ParameterType.Is(typeof(Simulator))) {
+                        okMethod = true;
+                        continue;
+                    }
+                }
+
+                if (okMethod) {
+                    continue;
+                }
+
                 Type? declaringType = resolved.DeclaringType;
                 if (declaringType is not null)
                 {
                     if (
                         declaringType == typeof(Math)
                      || declaringType.FullName == "System.MathF"
+                     || declaringType == typeof(Simulator)
                      || (declaringType.IsGenericType && declaringType.GetGenericTypeDefinition() == typeof(List<>))
                      || declaringType.IsArray
                     )
@@ -494,7 +348,15 @@ public class SpawnAnNPCRewriter
                     continue;
                 }
 
-                DynamicMethodDefinition dmd = new(resolved);
+                DynamicMethodDefinition dmd;
+                try
+                {
+                    dmd = new(resolved);
+                }
+                catch (Exception ex)
+                {
+                    throw new AggregateException($"Exception while loading method {method.FullName} for side-effect analysis", ex);
+                }
                 ILContext ilc = new(dmd.Definition);
 
                 if (VerifyNoSideEffects(new(ilc), allowFields, allowMethods, null, true))
@@ -646,7 +508,6 @@ public class SpawnAnNPCRewriter
             x => x.MatchCall<NPC.Spawner>("GetZombieSettings")
         ))
         {
-            Console.WriteLine("Warning! ReplaceGetZombieSetings fail in matching callsite");
             return;
         }
 
@@ -966,8 +827,8 @@ public class SpawnAnNPCRewriter
             |>      +conv.i4
             ||
             ||      // Fake random call will be replaced
-            |>      +call       int32 NodeRewriter::FakeRandomNext(int32)
-            |>      +call       int32 NodeRewriter::AllUniqueValueHandlerMarker(int32)
+            |>      +call       int32 RandomCallNodeCodegen::FakeRandomNext(int32)
+            |>      +call       int32 RandomCallNodeCodegen::AllUniqueValueHandlerMarker(int32)
             ||/     +ldloca.s   bookPosition
             \\\     +call       FindNearbyBookReturnValue::GetPoint(FindNearbyBookReturnValue, int32, Point&)
             >       +ldc.i4.1
@@ -1008,8 +869,8 @@ public class SpawnAnNPCRewriter
             c.Emit(OpCodes.Ldlen);
             c.Emit(OpCodes.Conv_I4);
 
-            c.Emit<NodeRewriter>(OpCodes.Call, nameof(NodeRewriter.FakeRandomNext));
-            c.Emit<NodeRewriter>(OpCodes.Call, nameof(NodeRewriter.AllUniqueValueHandlerMarker));
+            c.Emit(OpCodes.Call, Utils.GetFieldOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.FakeRandomNext)));
+            c.Emit(OpCodes.Call, Utils.GetFieldOrThrow(typeof(RandomCallNodeCodegen), nameof(RandomCallNodeCodegen.AllUniqueValueHandlerMarker)));
             c.Emit(OpCodes.Ldloca, bookPosition);
             c.Emit<FindNearbyBookReturnValue>(OpCodes.Call, nameof(FindNearbyBookReturnValue.GetPoint));
             c.Emit(OpCodes.Ldc_I4_1);
@@ -1022,7 +883,8 @@ public class SpawnAnNPCRewriter
         }
     }
 
-    static void PatchGnomeInlineExpr(ILContext il) {
+    static void PatchGnomeInlineExpr(ILContext il)
+    {
         /*
              br.s      
              ldc.i4.0
@@ -1036,12 +898,13 @@ public class SpawnAnNPCRewriter
         ILCursor c = new(il);
 
         if (!c.TryGotoNext(
-            x=>x.MatchBr(out _),
-            x=>x.MatchLdcI4(0),
-            x=>x.MatchLdloc(out _),
-            x=>x.MatchCall<NPC.Spawner>("CheckToSpawnUndergroundGnomes")
-        )) {
-            throw new Exception("PatchGnomeInlineExpr patch fail");
+            x => x.MatchBr(out _),
+            x => x.MatchLdcI4(0),
+            x => x.MatchLdloc(out _),
+            x => x.MatchCall<NPC.Spawner>("CheckToSpawnUndergroundGnomes")
+        ))
+        {
+            return;
         }
 
         VariableDefinition validGnomeSpawn = new(il.Import(typeof(bool)));
@@ -1435,7 +1298,8 @@ public class SpawnAnNPCRewriter
                 allValuesAreSlimeTypes = true;
                 return true;
             }
-            else {
+            else
+            {
                 return false;
             }
         }
@@ -1458,7 +1322,7 @@ public class SpawnAnNPCRewriter
 
                 foreach (Instruction valueProducer in sv.producedBy)
                 {
-                    var res = CanThisInstructionOutputASlimeType(il, valueProducer, stack, out _, recursionLimit-1);
+                    var res = CanThisInstructionOutputASlimeType(il, valueProducer, stack, out _, recursionLimit - 1);
 
                     if (res is not false)
                         return res;
@@ -1466,7 +1330,8 @@ public class SpawnAnNPCRewriter
             }
             return false;
         }
-        else if (instr.MatchCallOrCallvirt<UnifiedRandom>("Next")) {
+        else if (instr.MatchCallOrCallvirt<UnifiedRandom>("Next"))
+        {
 
             MethodReference next = (MethodReference)instr.Operand;
 
@@ -1483,16 +1348,20 @@ public class SpawnAnNPCRewriter
             StackValue min = stackInfo.inValues[stackInfo.inValues.Count - 2];
             StackValue max = stackInfo.inValues[stackInfo.inValues.Count - 1];
 
-            if (min.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeStart)) {
-                return null;
-            }
-            
-            if (max.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeEndExcl)) {
+            if (min.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeStart))
+            {
                 return null;
             }
 
-            for (int i = rangeStart; i < rangeEndExcl; i++) {
-                if (NPCID.FromNetId(i) == 1) {
+            if (max.producedBy.Count != 1 || !min.producedBy[0].MatchLdcI4(out rangeEndExcl))
+            {
+                return null;
+            }
+
+            for (int i = rangeStart; i < rangeEndExcl; i++)
+            {
+                if (NPCID.FromNetId(i) == 1)
+                {
                     return true;
                 }
             }
@@ -1504,13 +1373,99 @@ public class SpawnAnNPCRewriter
 
         return null;
     }
+
+    static void RewriteChanceFields(SimulatorCodegen codegen)
+    {
+        ILCursor c = new(codegen.IL);
+
+        List<FieldInfo> spawnerChanceFields = typeof(SpawnerChances)
+            .GetFields()
+            .Where(f => !f.IsStatic && f.Name.EndsWith("Chance"))
+            .Select(f => typeof(NPC.Spawner).GetField(f.Name.Substring(0, f.Name.Length - 6), (BindingFlags)(-1)))
+            .Where(f => f is not null)
+            .ToList()!;
+
+        FieldReference? field = null;
+
+        MethodInfo getCurrentTimelineState = Utils.GetMethodOrThrow<Simulator>(nameof(Simulator.GetCurrentTimelineState));
+
+        while (c.TryGotoNext(
+            x => x.MatchLdfld(out field) && spawnerChanceFields.Any(field.Is)
+        ))
+        {
+            Instruction ldfld = c.Next!;
+            bool needsPop = true;
+            if (c.Prev?.MatchLdarg(0) ?? false)
+            {
+                c.Goto(c.Prev);
+                if (!c.IncomingLabels.Any())
+                {
+                    c.Remove();
+                    needsPop = false;
+                }
+            }
+            c.Goto(ldfld, MoveType.AfterLabel);
+            if (needsPop)
+            {
+                c.Emit(OpCodes.Pop);
+            }
+
+            c.Remove();
+
+            List<StackValue> outValues = codegen.Stack!.LookupInstruction(ldfld, out _)!.outValues;
+
+            StackValue[] stackValues = new StackValue[outValues.Count - 1];
+            for (int i = 0; i < stackValues.Length; i++)
+            {
+                stackValues[i] = outValues[i];
+            }
+
+            ILLabel stateNonNull = c.DefineLabel();
+            ILLabel node = c.DefineLabel();
+            ILLabel result = c.DefineLabel();
+
+            VariableDefinition tempNullBoolVar = codegen.TempLocals.AllocVariable(c.IL.Import(typeof(bool?)));
+
+            c.Emit(OpCodes.Ldarg, codegen.SimulatorParam);
+            c.Emit(OpCodes.Call, getCurrentTimelineState);
+
+            c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow<SpawnAnNpcTimelineState>(field!.Name));
+            c.Emit(OpCodes.Stloc, tempNullBoolVar);
+            c.Emit(OpCodes.Ldloca, tempNullBoolVar);
+            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_HasValue"));
+            c.Emit(OpCodes.Brfalse, node);
+
+            c.Emit(OpCodes.Ldloca, tempNullBoolVar);
+            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_Value"));
+            c.Emit(OpCodes.Br, result);
+
+            c.MarkLabel(node);
+
+            codegen.EmitNode(c, FieldChanceNode.GetForField(field!.Name), NodeParameterInputBehavior.AlwaysNull, stackValues);
+
+            c.MarkLabel(result);
+
+            codegen.TempLocals.FreeVariable(tempNullBoolVar);
+        }
+    }
 }
 
-public delegate void RewrittenSpawnAnNPC(int? startFromRandomNode, SpawnSimulationContext ctx);
+public class SpawnAnNpcHelpers
+{
+    public static void SpawnNPC(Simulator sim, int x, int y, int type)
+    {
+        ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).ExitNodeHit_SpawnNPC(x, y, type);
+    }
+
+    public static void SpawnOnPlayer(Simulator sim, int type)
+    {
+        ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).ExitNodeHit_SpawnOnPlayer(type);
+    }
+}
 
 public class SpawnAnNPCRewriteData
 {
-    public RewrittenSpawnAnNPC Method;
+    public SimulatedMethod Method;
 
     public SimulationNodeInfo[] Nodes;
 
@@ -1518,11 +1473,239 @@ public class SpawnAnNPCRewriteData
 
     public bool PossiblyNonDeterministic;
 
-    public SpawnAnNPCRewriteData(RewrittenSpawnAnNPC method, SimulationNodeInfo[] nodes, DynamicStateType localStateType, bool possiblyNonDeterministic)
+    public SpawnAnNPCRewriteData(SimulatedMethod method, SimulationNodeInfo[] nodes, DynamicStateType localStateType, bool possiblyNonDeterministic)
     {
         Method = method;
         Nodes = nodes;
         LocalStateType = localStateType;
         PossiblyNonDeterministic = possiblyNonDeterministic;
+    }
+}
+
+#pragma warning disable CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
+public class SpawnAnNpcTimelineState
+#pragma warning restore CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
+{
+    public bool? spawnFriendly = null;
+    public bool? noWorms = null;
+    public bool? skyMob = null;
+    public bool? nearMarble = null;
+    public bool? nearGranite = null;
+    public bool? spawnSpider = null;
+    public bool? spawnUndergroundDesert = null;
+    public bool? isBeach = null;
+    public bool? isOcean = null;
+    public bool? surfaceSpawn = null;
+    public bool? dayTime = null;
+
+    readonly static Func<object, object> CloneImpl = DynamicStateType.GenerateCloneMethod(typeof(SpawnAnNpcTimelineState));
+    readonly static Func<object, object, bool> EqImpl = DynamicStateType.GenerateEqMethod(typeof(SpawnAnNpcTimelineState));
+
+    public SpawnAnNpcTimelineState()
+    {
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is not SpawnAnNpcTimelineState other)
+            return false;
+
+        return EqImpl(this, other);
+    }
+
+    public SpawnAnNpcTimelineState Clone()
+    {
+        return (SpawnAnNpcTimelineState)CloneImpl(this);
+    }
+
+    public static DynamicStateType StateType = new(typeof(SpawnAnNpcTimelineState), () => new SpawnAnNpcTimelineState(), EqImpl, CloneImpl);
+}
+
+public class SpawnAnNpcStaticData
+{
+    public required NPC.Spawner spawner;
+    public required int spawnTileX;
+    public required int spawnTileY;
+    public required int spawnTileType;
+    public required int spawnWallType;
+    public required bool xRange;
+    public required int target;
+
+    public required SpawnerChances chances;
+
+    public static FieldInfo ProvideArg(int arg, string argname)
+    {
+        string fieldname = argname;
+        if (arg == 0)
+        {
+            fieldname = nameof(spawner);
+        }
+
+        return Utils.GetFieldOrThrow<SpawnAnNpcStaticData>(fieldname);
+    }
+}
+
+public class SpawnAnNpcBlockResult
+{
+    public bool BranchDependsOnLuck = false;
+    public List<NextSpawn>? Spawns = null;
+
+    internal void ExitNodeHit_SpawnNPC(int x, int y, int type)
+    {
+        AddCurrentConnectionSpawn(new(type)
+        {
+            pos = new(x, y),
+        });
+    }
+
+    internal void ExitNodeHit_SpawnOnPlayer(int type)
+    {
+        AddCurrentConnectionSpawn(new(type)
+        {
+            spawnOnPlayer = true,
+        });
+    }
+
+    internal void AddCurrentConnectionSpawn(NextSpawn spawn)
+    {
+        Spawns ??= new();
+        Spawns.Add(spawn);
+    }
+}
+
+public struct NextSpawn
+{
+    public int npcId;
+
+    public NextSpawn(int npcId) : this()
+    {
+        this.npcId = npcId;
+    }
+
+    public Point? pos = null;
+
+    /// <summary>
+    /// Whether the spawn was hit from simulation itself or from an uncontrolled helper method
+    /// </summary>
+    public bool leakedSpawn = false;
+
+    /// <summary>
+    /// Whether the spawn uses NPC.SpawnOnPlayer
+    /// </summary>
+    public bool spawnOnPlayer = false;
+}
+
+class FieldChanceNode : SimulationNodeImpl
+{
+    readonly Func<Simulator, float> getChance;
+    readonly Action<Simulator> setFalse;
+    readonly Action<Simulator> setTrue;
+
+    static Dictionary<string, FieldChanceNode> cache = new();
+
+    public static FieldChanceNode GetForField(string fieldName)
+    {
+        if (cache.TryGetValue(fieldName, out FieldChanceNode? node))
+            return node;
+
+        FieldInfo chanceField = Utils.GetFieldOrThrow<SpawnerChances>(fieldName + "Chance");
+        FieldInfo stateField = Utils.GetFieldOrThrow<SpawnAnNpcTimelineState>(fieldName);
+        FieldInfo staticSimDataField = Utils.GetFieldOrThrow<Simulator>(nameof(Simulator.staticSimData));
+        FieldInfo chancesField = Utils.GetFieldOrThrow<SpawnAnNpcStaticData>(nameof(SpawnAnNpcStaticData.chances));
+
+        MethodInfo getCurrentTimelineState = Utils.GetMethodOrThrow<Simulator>(nameof(Simulator.GetCurrentTimelineState));
+        ConstructorInfo nullBoolCtor = typeof(bool?).GetConstructor([typeof(bool)]) ?? throw new MissingMethodException("bool? ctor");
+
+
+        DynamicMethodDefinition dmd = new($"GetSpawnerChanceField_{fieldName}", typeof(float), [typeof(Simulator)]);
+
+        ILProcessor il = dmd.GetILProcessor();
+
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldfld, staticSimDataField);
+        il.Emit(OpCodes.Ldfld, chancesField);
+        il.Emit(OpCodes.Ldfld, chanceField);
+        il.Emit(OpCodes.Ret);
+
+        Func<Simulator, float> getChance = dmd.Generate().CreateDelegate<Func<Simulator, float>>();
+
+
+        dmd = new($"SetSimulationTimelineStateFieldFalse_{fieldName}", typeof(void), [typeof(Simulator)]);
+        il = dmd.GetILProcessor();
+
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, getCurrentTimelineState);
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Newobj, nullBoolCtor);
+        il.Emit(OpCodes.Stfld, stateField);
+        il.Emit(OpCodes.Ret);
+
+        Action<Simulator> setFalse = dmd.Generate().CreateDelegate<Action<Simulator>>();
+
+        dmd = new($"SetSimulationTimelineStateFieldTrue_{fieldName}", typeof(void), [typeof(Simulator)]);
+        il = dmd.GetILProcessor();
+
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, getCurrentTimelineState);
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Newobj, nullBoolCtor);
+        il.Emit(OpCodes.Stfld, stateField);
+        il.Emit(OpCodes.Ret);
+
+        Action<Simulator> setTrue = dmd.Generate().CreateDelegate<Action<Simulator>>();
+
+        node = new(getChance, setFalse, setTrue);
+
+        cache.Add(fieldName, node);
+
+        return node;
+    }
+
+    private FieldChanceNode(Func<Simulator, float> getChance, Action<Simulator> setFalse, Action<Simulator> setTrue)
+    {
+        this.getChance = getChance;
+        this.setFalse = setFalse;
+        this.setTrue = setTrue;
+    }
+
+    public override void NodeHit(Simulator sim, object param, out BranchInfo[] branches)
+    {
+        float chance = getChance(sim);
+
+        if (chance >= 1f)
+        {
+            branches = [
+                new() {
+                    chance = 1f,
+                    returnValue = 1,
+                    onBranchSelected = setTrue,
+                }
+            ];
+        }
+        else if (chance <= 0f)
+        {
+            branches = [
+                new() {
+                    chance = 1f,
+                    returnValue = 0,
+                    onBranchSelected = setFalse,
+                }
+            ];
+        }
+        else
+        {
+            branches = [
+                new() {
+                    chance = chance,
+                    returnValue = 1,
+                    onBranchSelected = setTrue,
+                },
+                new() {
+                    chance = 1f - chance,
+                    returnValue = 0,
+                    onBranchSelected = setFalse,
+                }
+            ];
+        }
     }
 }

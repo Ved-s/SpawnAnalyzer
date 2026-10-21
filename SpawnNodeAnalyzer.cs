@@ -9,6 +9,8 @@ using Terraria.ID;
 
 namespace SpawnAnalyzer;
 
+
+/*
 class AnalyzerStackFrame
 {
     public NodeConnection? incomingConnection;
@@ -425,6 +427,7 @@ public class AnalyzedMultiPosSpawn
         return spawn;
     }
 }
+*/
 
 public class AnalyzedSpawn
 {

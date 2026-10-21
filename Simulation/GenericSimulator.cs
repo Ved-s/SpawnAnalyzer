@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace SpawnAnalyzer.Simulation.Test;
+namespace SpawnAnalyzer.Simulation;
 
 /*
           C - D
@@ -41,6 +41,13 @@ public class Simulator
     int? foundInitialNode = null;
 
     bool hasErrors = false;
+
+    public bool NonDeterministic = false;
+
+    [ThreadStatic]
+    static Simulator? currentlyRunningSimulation;
+
+    public static Simulator? CurrentlyRunningSimulation => currentlyRunningSimulation;
 
     public Simulator(
         object staticSimData,
@@ -196,6 +203,7 @@ public class Simulator
         localState = localsType.CreateNew();
         startBlockTimelineState = timelineStateType.CreateNew();
         currentTimeline = 0;
+        currentlyRunningSimulation = this;
 
         int? entry = null;
         while (true)
@@ -265,6 +273,8 @@ public class Simulator
             entry = nextNode.Value;
         }
 
+        currentlyRunningSimulation = null;
+
         SimulationResult res = BuildResult();
 
         populatedNodes = new();
@@ -286,6 +296,8 @@ public class Simulator
 
         for (int i = 0; i < nodes.Length; i++)
         {
+            if (i >= populatedNodes.Count) 
+                break;
             SimulationNode? node = populatedNodes[i];
             if (node is null) continue;
 
@@ -388,8 +400,8 @@ public struct SimulationBlock
 
 public struct SimulationBlockBranch
 {
-    float chance;
-    int nextBlock;
+    public float chance;
+    public int nextBlock;
 
     public SimulationBlockBranch(float chance, int nextBlock)
     {

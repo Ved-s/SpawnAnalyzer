@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using Microsoft.Xna.Framework;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using SpawnAnalyzer.Simulation;
 using Terraria;
 
@@ -32,7 +33,7 @@ public class SpawnAnalysisSpot
     readonly NPC.Spawner localSpawner;
     readonly SpawnAnalysis analysis;
 
-    readonly SpawnSimulationContext simulationContext;
+    readonly Simulator simulationContext;
 
     public bool NonDeterministic = false;
 
@@ -40,7 +41,7 @@ public class SpawnAnalysisSpot
         SpawnerChances chances,
         NPC.Spawner localSpawner,
         SpawnAnalysis analysis,
-        SpawnSimulationContext simulationContext,
+        Simulator simulationContext,
         SpawnParamsStage1 p,
         Point spawnPosition,
         Point tilePosition,
@@ -76,7 +77,7 @@ public class SpawnAnalysisSpot
 
         int spawnTileType = (int)Main.tile[tilePosition.X, tilePosition.Y].type;
         int spawnWallType = NPC.Spawner.GetSpawnWallType(spawnPosition.X, spawnPosition.Y);
-        
+
         float validChance = impl.PostCheckChosenSpawnTileImpl(analysis.globalSpawner, position.X, position.Y, spawnTileType, spawnWallType);
         if (validChance <= 0)
         {
@@ -94,10 +95,29 @@ public class SpawnAnalysisSpot
 
         impl.SetSpawnFlagsForChosenTileImpl(spawner, spawnPosition.X, spawnPosition.Y, tilePosition.Y, spawnTileType, spawnWallType, localChances);
 
-        SpawnSimulationContext simulationContext = new(impl.SpawnAnNpcRewrite, localChances, spawner, spawnPosition.X, spawnPosition.Y, spawnTileType, spawnWallType, p.xRange);
+        SpawnAnNpcStaticData staticData = new()
+        {
+            spawner = spawner,
+            spawnTileX = spawnPosition.X,
+            spawnTileY = spawnPosition.Y,
+            spawnTileType = spawnTileType,
+            spawnWallType = spawnWallType,
+            xRange = p.xRange,
+            target = Main.myPlayer,
+            chances = localChances
+        };
+
+        Simulator simulator = new(
+            staticData,
+            impl.SpawnAnNpcRewrite.Method,
+            impl.SpawnAnNpcRewrite.Nodes,
+            impl.SpawnAnNpcRewrite.LocalStateType,
+            SpawnAnNpcTimelineState.StateType,
+            () => new SpawnAnNpcBlockResult()
+        );
 
         spot = new SpawnAnalysisSpot(
-            localChances, spawner, analysis, simulationContext, p, 
+            localChances, spawner, analysis, simulator, p,
             spawnPosition, tilePosition, spawnTileType, spawnWallType, validChance
         );
         return true;
@@ -105,6 +125,9 @@ public class SpawnAnalysisSpot
 
     internal void Simulate(out TimeSpan analysisTime, SpawnAnalysisResults outResults)
     {
+
+        throw new NotImplementedException();
+        /*
         SimulationResult? results = simulationContext.Simulate();
         NonDeterministic = simulationContext.NonDeterministic;
         analysis.NonDeterministic |= NonDeterministic;
@@ -204,6 +227,7 @@ public class SpawnAnalysisSpot
         }
         sw.Stop();
         analysisTime = sw.Elapsed;
+        */
     }
 
     internal void MouseOver(StringBuilder mouseOverText)

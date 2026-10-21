@@ -16,23 +16,10 @@ using Terraria.Utilities;
 using OpCodes = Mono.Cecil.Cil.OpCodes;
 using ROpCodes = System.Reflection.Emit.OpCodes;
 
-namespace SpawnAnalyzer.Rewriters.SpawnAnNPC;
+namespace SpawnAnalyzer.Simulation;
 
-class NodeRewriter
+public static class RandomCallNodeCodegen
 {
-    static int StackStatesGenerated = 0;
-
-    readonly List<SimulationNodeInfo> nodes;
-    readonly ParameterDefinition contextParam;
-    readonly VariableDefinition stopVar;
-    readonly VariableDefinition nodeParamVar;
-    readonly VariableDefinition stackStateVar;
-    readonly VariableDefinition tempIntVar;
-    readonly VariableDefinition tempNullBoolVar;
-    readonly List<ILLabel> entryJumps;
-    readonly HashSet<FieldInfo> allowFields;
-    readonly HashSet<MethodBase> allowMethods;
-    readonly StackAnalysis stack;
 
     static Dictionary<Mono.Cecil.Cil.OpCode, EqualityType> ConditionalOpcodeEqualityTypes = new()
     {
@@ -61,56 +48,24 @@ class NodeRewriter
         { OpCodes.Bge_Un_S, EqualityType.Ge },
     };
 
-    public NodeRewriter(
-        List<SimulationNodeInfo> nodes,
-        ParameterDefinition contextParam,
-        VariableDefinition stopVar,
-        VariableDefinition nodeParamVar,
-        VariableDefinition stackStateVar,
-        VariableDefinition tempIntVar,
-        VariableDefinition tempNullBoolVar,
-        List<ILLabel> entryJumps,
-        HashSet<FieldInfo> allowFields,
-        HashSet<MethodBase> allowMethods,
-        StackAnalysis stack
-    )
-    {
-        this.nodes = nodes;
-        this.contextParam = contextParam;
-        this.stopVar = stopVar;
-        this.nodeParamVar = nodeParamVar;
-        this.stackStateVar = stackStateVar;
-        this.tempIntVar = tempIntVar;
-        this.tempNullBoolVar = tempNullBoolVar;
-        this.entryJumps = entryJumps;
-        this.allowFields = allowFields;
-        this.allowMethods = allowMethods;
-        this.stack = stack;
-    }
-
-    public void RewriteNodes(ILCursor c, bool allowUnknownPatterns)
-    {
-        RewriteRandomCalls(c, allowUnknownPatterns);
-        RewriteChanceFields(c);
-    }
-    public void RewriteRandomCalls(ILCursor c, bool allowUnknownPatterns)
+    public static void RewriteRandomCalls(SimulatorCodegen codegen, bool allowUnknownPatterns, SimulationLuckMethods luck)
     {
         ulong unknownPatterns = 0;
         ulong knownPatterns = 0;
 
-        c.Index = 0;
+        ILCursor c = new(codegen.IL);
 
         while (c.TryGotoNext(
             x => x.MatchCallOrCallvirt<UnifiedRandom>("Next")
               || x.MatchCall("Terraria.Utils", "SelectRandom")
               || x.MatchCallOrCallvirt(out MethodReference? mr) && mr.Name.StartsWith("Roll")
-              || x.MatchCall<NodeRewriter>(nameof(FakeRandomNext))
+              || x.MatchCall(typeof(RandomCallNodeCodegen), nameof(FakeRandomNext))
         ))
         {
             Instruction instr = c.Next!;
             MethodReference method = (instr.Operand as MethodReference)!;
 
-            InstructionStackInfo stackInfo = stack.LookupInstruction(instr, out _)
+            InstructionStackInfo stackInfo = codegen.Stack!.LookupInstruction(instr, out _)
                 ?? throw new InvalidOperationException("Stack analysis out of date or invalid");
 
             Instruction? thisLoadInstr = null;
@@ -150,7 +105,7 @@ class NodeRewriter
             }
 
             c.Goto(instr.Next);
-            ValueHandler? valueHandler = TryCreateValueHandler(c, stackInfo.outValues[stackInfo.outValues.Count - 1], allowUnknownPatterns);
+            ValueHandler? valueHandler = RandomCallNodeCodegen.TryCreateValueHandler(c, stackInfo.outValues[stackInfo.outValues.Count - 1], allowUnknownPatterns);
             if (valueHandler is null)
             {
                 SpawnAnalyzer.ReportUnknownPattern("random call value handler", c.Context, c.Instrs.IndexOf(instr) + 1, 2, 10);
@@ -164,9 +119,9 @@ class NodeRewriter
                 c.Goto(instr.Previous);
                 Instruction lastParamInitInstr = c.Next!;
 
-                ParamProvider<int> param = CreateSingleIntProvider(c);
+                ParamProvider<int> param = RandomCallNodeCodegen.CreateSingleIntProvider(c, codegen.NodeHitParamVar);
 
-                SimulationNodeImpl? node = TryBuildSingleIntSimulationNode(method, param, valueHandler.Value);
+                SimulationNodeImpl? node = RandomCallNodeCodegen.TryBuildSingleIntSimulationNode(method, param, valueHandler.Value, luck);
                 if (node is null)
                 {
                     SpawnAnalyzer.ReportUnknownPattern("random call method", c.Context, c.Instrs.IndexOf(instr), 5, 5);
@@ -183,7 +138,7 @@ class NodeRewriter
 
                 c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
+                codegen.EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -197,7 +152,7 @@ class NodeRewriter
                 c.Goto(instr.Previous);
                 Instruction lastParamInitInstr = c.Next!;
 
-                ParamProvider<(int, int)> param = CreateDoubleIntProvider(c);
+                ParamProvider<(int, int)> param = CreateDoubleIntProvider(c, codegen.NodeHitParamVar);
 
                 SimulationNodeImpl? node = TryBuildDoubleIntSimulationNode(method, param, valueHandler.Value);
                 if (node is null)
@@ -216,7 +171,7 @@ class NodeRewriter
 
                 c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
+                codegen.EmitNode(c, node, param.ParameterInputBehavior, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -235,7 +190,7 @@ class NodeRewriter
                 }
 
                 c.Goto(instr);
-                c.Emit(OpCodes.Stloc, nodeParamVar);
+                c.Emit(OpCodes.Stloc, codegen.NodeHitParamVar);
 
                 SimulationNodeImpl? node = SelectRandomNode.Build(valueHandler.Value);
                 if (node is null)
@@ -254,7 +209,7 @@ class NodeRewriter
 
                 c.Goto(instr, MoveType.AfterLabel);
                 c.Remove();
-                EmitNode(c, node, NodeParameterInputBehavior.LoadFromParamVar, passingStackValues);
+                codegen.EmitNode(c, node, NodeParameterInputBehavior.LoadFromParamVar, passingStackValues);
 
                 knownPatterns++;
                 continue;
@@ -273,212 +228,7 @@ class NodeRewriter
         }
     }
 
-    public void RewriteChanceFields(ILCursor c)
-    {
-        c.Index = 0;
-
-        List<FieldInfo> spawnerChanceFields = typeof(SpawnerChances)
-            .GetFields()
-            .Where(f => !f.IsStatic && f.Name.EndsWith("Chance"))
-            .Select(f => typeof(NPC.Spawner).GetField(f.Name.Substring(0, f.Name.Length - 6), (BindingFlags)(-1)))
-            .Where(f => f is not null)
-            .ToList()!;
-
-        FieldReference? field = null;
-
-        MethodInfo getCurrentTimelineState = Utils.GetMethodOrThrow<SpawnSimulationContext>("GetCurrentTimelineState");
-
-        while (c.TryGotoNext(
-            x => x.MatchLdfld(out field) && spawnerChanceFields.Any(field.Is)
-        ))
-        {
-            Instruction ldfld = c.Next!;
-            bool needsPop = true;
-            if (c.Prev?.MatchLdarg(0) ?? false)
-            {
-                c.Goto(c.Prev);
-                if (!c.IncomingLabels.Any())
-                {
-                    c.Remove();
-                    needsPop = false;
-                }
-            }
-            c.Goto(ldfld, MoveType.AfterLabel);
-            if (needsPop)
-            {
-                c.Emit(OpCodes.Pop);
-            }
-
-            c.Remove();
-
-            List<StackValue> outValues = stack.LookupInstruction(ldfld, out _)!.outValues;
-
-            StackValue[] stackValues = new StackValue[outValues.Count - 1];
-            for (int i = 0; i < stackValues.Length; i++)
-            {
-                stackValues[i] = outValues[i];
-            }
-
-            ILLabel stateNonNull = c.DefineLabel();
-            ILLabel node = c.DefineLabel();
-            ILLabel result = c.DefineLabel();
-
-            c.Emit(OpCodes.Ldarg, contextParam);
-            c.Emit(OpCodes.Call, getCurrentTimelineState);
-            c.Emit(OpCodes.Dup);
-            c.Emit(OpCodes.Brtrue, stateNonNull);
-            c.Emit(OpCodes.Pop);
-            c.Emit(OpCodes.Br, node);
-
-            c.MarkLabel(stateNonNull);
-
-            c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow<SimulationTimelineState>(field!.Name));
-            c.Emit(OpCodes.Stloc, tempNullBoolVar);
-            c.Emit(OpCodes.Ldloca, tempNullBoolVar);
-            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_HasValue"));
-            c.Emit(OpCodes.Brfalse, node);
-
-            c.Emit(OpCodes.Ldloca, tempNullBoolVar);
-            c.Emit(OpCodes.Call, Utils.GetMethodOrThrow<bool?>("get_Value"));
-            c.Emit(OpCodes.Br, result);
-
-            c.MarkLabel(node);
-
-            EmitNode(c, FieldChanceNode.GetForField(field!.Name), NodeParameterInputBehavior.AlwaysNull, stackValues);
-
-            c.MarkLabel(result);
-        }
-    }
-
-    private void EmitNode(ILCursor c, SimulationNodeImpl node, NodeParameterInputBehavior pb, StackValue[] stackValues)
-    {
-        ILLabel afterStopHandler = c.DefineLabel();
-
-        ILLabel entryJumpLabel = c.DefineLabel();
-        entryJumps.Add(entryJumpLabel);
-
-        // TODO: cache
-        DynamicStateType? stackStateType = null;
-
-        List<StackValuePreserveType> stackValuePreserves = new();
-
-        if (stackValues.Length > 0)
-        {
-            int? spawnNPCThisArg = null;
-            List<Type> typesToPreserve = new();
-
-            for (int i = 0; i < stackValues.Length; i++)
-            {
-                StackValue sv = stackValues[i];
-                if (sv.type is null)
-                {
-                    throw new InvalidOperationException("Can't preserve stack value of unknown type");
-                }
-                if (sv.simpleType == SimpleType.Reference)
-                {
-                    throw new InvalidOperationException("Can't preserve stack value of reference type");
-                }
-
-                // TODO: optimize common patterns
-                StackValuePreserveType pt = StackValuePreserveType.Preserve;
-
-                if (spawnNPCThisArg is null
-                    && sv.consumedBy.Count == 1
-                    && sv.consumedBy[0].MatchCallOrCallvirt(out MethodReference? consumerMethod)
-                    && consumerMethod.Name == "SpawnNPC"
-                )
-                {
-                    spawnNPCThisArg = i;
-                    pt = StackValuePreserveType.ContextParam;
-                }
-
-                if (pt == StackValuePreserveType.Preserve)
-                {
-                    typesToPreserve.Add(sv.type);
-                }
-                stackValuePreserves.Add(pt);
-            }
-
-            stackStateType = DynamicStateType.Generate($"RandomCallStackState_{StackStatesGenerated}", typesToPreserve);
-            StackStatesGenerated++;
-
-            MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackValues, stackValuePreserves, stackStateType.Type);
-            c.Emit(OpCodes.Ldarg, contextParam);
-            c.Emit(OpCodes.Call, stackSaveMethod);
-
-            allowMethods.Add(stackSaveMethod);
-
-            // foreach (var _ in stackValuePreserves)
-            // {
-            //     c.Emit(OpCodes.Pop);
-            // }
-        }
-
-        c.MarkLabel(entryJumpLabel);
-
-        c.Emit(OpCodes.Ldarg, contextParam);
-
-        c.Emit(OpCodes.Ldc_I4, nodes.Count);
-        switch (pb)
-        {
-            case NodeParameterInputBehavior.AlwaysNull:
-                c.Emit(OpCodes.Ldnull);
-                break;
-
-            case NodeParameterInputBehavior.LoadFromParamVar:
-                c.Emit(OpCodes.Ldloc, nodeParamVar);
-                break;
-        }
-        c.Emit(OpCodes.Ldloca, stopVar);
-        c.Emit<SpawnSimulationContext>(OpCodes.Call, "NodeHit");
-        c.Emit(OpCodes.Ldloc, stopVar);
-        c.Emit(OpCodes.Brfalse, afterStopHandler);
-
-        // rolledValue
-        c.Emit(OpCodes.Pop);
-        c.Emit(OpCodes.Ret);
-
-        c.MarkLabel(afterStopHandler);
-
-        if (stackValuePreserves.Count > 0)
-        {
-            c.Emit(OpCodes.Stloc, tempIntVar);
-
-
-            // TODO: don't create state type when nothing is being preserved
-            c.Emit(OpCodes.Ldarg, contextParam);
-            c.Emit<SpawnSimulationContext>(OpCodes.Call, "GetLastNodeStackStateClone");
-            c.Emit(OpCodes.Stloc, stackStateVar);
-
-            int fieldIndex = 0;
-            for (int i = 0; i < stackValuePreserves.Count; i++)
-            {
-                switch (stackValuePreserves[i])
-                {
-                    case StackValuePreserveType.Preserve:
-                        c.Emit(OpCodes.Ldloc, stackStateVar);
-                        c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, DynamicStateType.GetAutoFieldName(fieldIndex)));
-                        fieldIndex++;
-                        break;
-
-                    case StackValuePreserveType.ContextParam:
-                        c.Emit(OpCodes.Ldarg, contextParam);
-                        break;
-
-                    default:
-                        throw new NotImplementedException($"Restore StackValuePreserveType.{stackValuePreserves[i]} onto stack");
-                }
-            }
-
-            c.Emit(OpCodes.Ldloc, tempIntVar);
-        }
-
-        SimulationNodeInfo info = new(stackStateType, node);
-
-        nodes.Add(info);
-    }
-
-    private ParamProvider<int> CreateSingleIntProvider(ILCursor c)
+    private static ParamProvider<int> CreateSingleIntProvider(ILCursor c, VariableDefinition nodeHitParam)
     {
         int staticValue = 0;
         if (c.IncomingLabels.Count() == 0
@@ -496,12 +246,12 @@ class NodeRewriter
         c.Goto(c.Index + 1, MoveType.AfterLabel);
 
         c.Emit(OpCodes.Box, c.Context.Import(typeof(int)));
-        c.Emit(OpCodes.Stloc, nodeParamVar);
+        c.Emit(OpCodes.Stloc, nodeHitParam);
 
         return new RuntimeParamVarCastParamProvider<int>();
     }
 
-    private ParamProvider<(int, int)> CreateDoubleIntProvider(ILCursor c)
+    private static ParamProvider<(int, int)> CreateDoubleIntProvider(ILCursor c, VariableDefinition nodeHitParam)
     {
         int staticValue0 = 0;
         int staticValue1 = 0;
@@ -518,13 +268,13 @@ class NodeRewriter
         }
 
         c.Index += 1;
-        c.Emit<NodeRewriter>(OpCodes.Call, nameof(PackTwoIntTupleBoxed));
-        c.Emit(OpCodes.Stloc, nodeParamVar);
+        c.Emit(OpCodes.Call, Utils.GetMethodOrThrow(typeof(RandomCallNodeCodegen), nameof(PackTwoIntTupleBoxed)));
+        c.Emit(OpCodes.Stloc, nodeHitParam);
 
         return new RuntimeParamVarCastParamProvider<(int, int)>();
     }
 
-    private ValueHandler? TryCreateValueHandler(ILCursor c, StackValue value, bool allowUnknownPatterns)
+    private static ValueHandler? TryCreateValueHandler(ILCursor c, StackValue value, bool allowUnknownPatterns)
     {
         Instruction ins = c.Next!;
         int index = c.Index;
@@ -557,12 +307,12 @@ class NodeRewriter
             c.Goto(target.Target);
             return TryCreateValueHandler(c, value, allowUnknownPatterns);
         }
-        else if (ins.MatchCall<NodeRewriter>(nameof(AllUniqueValueHandlerMarker)))
+        else if (ins.MatchCall(typeof(RandomCallNodeCodegen), nameof(AllUniqueValueHandlerMarker)))
         {
             c.Remove();
             return new(ValueHandlerType.AllUnique);
         }
-        else if (value.consumedBy.Count == 1 && value.consumedBy[0].MatchCall<NodeRewriter>(nameof(AllUniqueValueHandlerMarker)))
+        else if (value.consumedBy.Count == 1 && value.consumedBy[0].MatchCall(typeof(RandomCallNodeCodegen), nameof(AllUniqueValueHandlerMarker)))
         {
             c.Instrs.Remove(value.consumedBy[0]);
             return new(ValueHandlerType.AllUnique);
@@ -620,31 +370,31 @@ class NodeRewriter
         return new(ValueHandlerType.AllUnique);
     }
 
-    private SimulationNodeImpl? TryBuildSingleIntSimulationNode(MethodReference method, ParamProvider<int> param, ValueHandler valHandler)
+    private static SimulationNodeImpl? TryBuildSingleIntSimulationNode(MethodReference method, ParamProvider<int> param, ValueHandler valHandler, SimulationLuckMethods luck)
     {
         if (method.Name == "Next" || method.Name == nameof(FakeRandomNext))
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.None);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.None, luck);
         }
         if (method.Name == "RollLuck")
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.GoodLuck);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.GoodLuck, luck);
         }
         if (method.Name == "RollBadLuck")
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.BadLuck);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.BadLuck, luck);
         }
         if (method.Name == "RollOnlyBadLuck")
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuck);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuck, luck);
         }
         if (method.Name == "RollBadLuckExtreme")
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.BadLuckExtreme);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.BadLuckExtreme, luck);
         }
         if (method.Name == "RollOnlyBadLuckExtreme")
         {
-            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuckExtreme);
+            return OneParamRandomNextNode.Build(param, valHandler, LuckDependance.OnlyBadLuckExtreme, luck);
         }
         if (method.Name == "RollDragonflyType")
         {
@@ -653,7 +403,7 @@ class NodeRewriter
         return null;
     }
 
-    private SimulationNodeImpl? TryBuildDoubleIntSimulationNode(MethodReference method, ParamProvider<(int, int)> param, ValueHandler valHandler)
+    private static SimulationNodeImpl? TryBuildDoubleIntSimulationNode(MethodReference method, ParamProvider<(int, int)> param, ValueHandler valHandler)
     {
         if (method.Name == "Next")
         {
@@ -667,66 +417,6 @@ class NodeRewriter
         return (a, b);
     }
 
-    private static MethodInfo GenerateStackSaveMethod(StackValue[] values, List<StackValuePreserveType> preserves, Type stackStateType)
-    {
-        Type[] pt = new Type[values.Length + 1];
-
-        for (int i = 0; i < values.Length; i++)
-        {
-            switch (preserves[i])
-            {
-                case StackValuePreserveType.Preserve:
-                    pt[i] = values[i].type!;
-                    break;
-
-                case StackValuePreserveType.ContextParam:
-                    pt[i] = typeof(object);
-                    break;
-
-                default:
-                    throw new NotImplementedException($"GenerateStackSaveMethod StackValuePreserveType.{preserves[i]}");
-            }
-        }
-
-        pt[pt.Length - 1] = typeof(SpawnSimulationContext);
-
-        DynamicMethod dmd = new($"StackSave_{stackStateType.Name}", typeof(void), pt);
-
-        ILGenerator il = dmd.GetILGenerator();
-
-        LocalBuilder stateVar = il.DeclareLocal(stackStateType);
-
-        MethodInfo createInstance = (typeof(Activator)
-            .GetMethods()
-            .FirstOrDefault(m => m.Name == "CreateInstance" && m.IsGenericMethod)
-            ?? throw new MissingMethodException("Activator::CreateInstance<T>"))
-            .MakeGenericMethod([stackStateType]);
-
-        il.Emit(ROpCodes.Call, createInstance);
-        il.Emit(ROpCodes.Stloc, stateVar);
-
-        int fieldIndex = 0;
-        for (int i = 0; i < values.Length; i++)
-        {
-            if (preserves[i] == StackValuePreserveType.Preserve)
-            {
-                il.Emit(ROpCodes.Ldloc, stateVar);
-                il.Emit(ROpCodes.Ldarg, i);
-                il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, DynamicStateType.GetAutoFieldName(fieldIndex)));
-
-                fieldIndex++;
-            }
-        }
-
-        il.Emit(ROpCodes.Ldarg, pt.Length - 1);
-        il.Emit(ROpCodes.Ldloc, stateVar);
-        il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow<SpawnSimulationContext>("stackState"));
-
-        il.Emit(ROpCodes.Ret);
-
-        return dmd;
-    }
-
     public static int FakeRandomNext(int max)
     {
         throw new InvalidOperationException("Called placeholder function");
@@ -735,23 +425,11 @@ class NodeRewriter
     public static int AllUniqueValueHandlerMarker(int v) => v;
 }
 
-enum StackValuePreserveType
-{
-    Preserve,
-    ContextParam,
-}
-
-enum NodeParameterInputBehavior
-{
-    AlwaysNull,
-    LoadFromParamVar,
-}
-
 abstract class ParamProvider<T>
 {
     public abstract NodeParameterInputBehavior ParameterInputBehavior { get; }
 
-    public abstract T Provide(object paramInput, NodeRollInfo rollParams);
+    public abstract T Provide(object paramInput);
 }
 
 struct ValueRange
@@ -847,7 +525,7 @@ class StaticParamProvider<T> : ParamProvider<T>
 
     public override NodeParameterInputBehavior ParameterInputBehavior => NodeParameterInputBehavior.AlwaysNull;
 
-    public override T Provide(object _paramInput, NodeRollInfo _rollParams)
+    public override T Provide(object _paramInput)
     {
         return value;
     }
@@ -857,7 +535,7 @@ class RuntimeParamVarCastParamProvider<T> : ParamProvider<T>
 {
     public override NodeParameterInputBehavior ParameterInputBehavior => NodeParameterInputBehavior.LoadFromParamVar;
 
-    public override T Provide(object paramInput, NodeRollInfo _rollParams)
+    public override T Provide(object paramInput)
     {
         return (T)paramInput;
     }
@@ -873,14 +551,17 @@ class OneParamRandomNextNode : SimulationNodeImpl
 
     readonly LuckDependance luckDependance;
 
-    private OneParamRandomNextNode(ParamProvider<int> param, ValueHandler handler, LuckDependance luckDependance)
+    readonly SimulationLuckMethods luck;
+
+    private OneParamRandomNextNode(ParamProvider<int> param, ValueHandler handler, LuckDependance luckDependance, SimulationLuckMethods luck)
     {
         this.param = param;
         this.handler = handler;
         this.luckDependance = luckDependance;
+        this.luck = luck;
     }
 
-    public static OneParamRandomNextNode? Build(ParamProvider<int> param, ValueHandler handler, LuckDependance luckDependance)
+    public static OneParamRandomNextNode? Build(ParamProvider<int> param, ValueHandler handler, LuckDependance luckDependance, SimulationLuckMethods luck)
     {
         if (handler.type != ValueHandlerType.ZeroOrNonzero && handler.type != ValueHandlerType.LeValueOrGtValue && handler.type != ValueHandlerType.AllUnique)
         {
@@ -890,7 +571,7 @@ class OneParamRandomNextNode : SimulationNodeImpl
         {
             return null;
         }
-        return new(param, handler, luckDependance);
+        return new(param, handler, luckDependance, luck);
     }
 
     public static float? LuckChanceMod(float chance, LuckDependance dep, float luck, out bool dependsOnLuck)
@@ -929,9 +610,9 @@ class OneParamRandomNextNode : SimulationNodeImpl
         return chance;
     }
 
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
+    public override void NodeHit(Simulator sim, object param, out BranchInfo[] branches)
     {
-        int value = Math.Max(1, this.param.Provide(param, rollParams));
+        int value = Math.Max(1, this.param.Provide(param));
 
         switch (handler.type)
         {
@@ -940,14 +621,14 @@ class OneParamRandomNextNode : SimulationNodeImpl
                 float hitChance = 1f / value;
                 bool dependsOnLuck;
 
-                float? tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
+                float? tryhitChance = LuckChanceMod(hitChance, luckDependance, luck.GetLuck(sim), out dependsOnLuck);
 
-                Action<SpawnSimulationContext>? onHitLuckyBranch = null;
+                Action<Simulator>? onHitLuckyBranch = null;
                 if (dependsOnLuck)
                 {
-                    onHitLuckyBranch = (SpawnSimulationContext ctx) =>
+                    onHitLuckyBranch = sim =>
                     {
-                        ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
+                        luck.OnLuckBasedBranchHit(sim);
                     };
                 }
 
@@ -980,13 +661,13 @@ class OneParamRandomNextNode : SimulationNodeImpl
 
                 hitChance = (float)(handler.value + 1) / value;
 
-                tryhitChance = LuckChanceMod(hitChance, luckDependance, context.spawner.luck, out dependsOnLuck);
+                tryhitChance = LuckChanceMod(hitChance, luckDependance, luck.GetLuck(sim), out dependsOnLuck);
                 onHitLuckyBranch = null;
                 if (dependsOnLuck)
                 {
-                    onHitLuckyBranch = (SpawnSimulationContext ctx) =>
+                    onHitLuckyBranch = sim =>
                     {
-                        ctx.CurrentConnection!.rollInfo.dependsOnLuck = true;
+                        luck.OnLuckBasedBranchHit(sim);
                     };
                 }
 
@@ -1058,9 +739,9 @@ class TwoParamRandomNextNode : SimulationNodeImpl
         return new(param, handler);
     }
 
-    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
+    public override void NodeHit(Simulator _sim, object param, out BranchInfo[] branches)
     {
-        var (start, end) = this.param.Provide(param, rollParams);
+        var (start, end) = this.param.Provide(param);
 
         end = Math.Max(end, start + 1);
 
@@ -1127,7 +808,7 @@ class SelectRandomNode : SimulationNodeImpl
         throw new ArgumentException($"Don't know how to enumerate ints from {param.GetType()}");
     }
 
-    public override void NodeHit(SpawnSimulationContext _context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
+    public override void NodeHit(Simulator _sim, object param, out BranchInfo[] branches)
     {
         IEnumerable<int> values = GetIntEnumerable(param, out int length);
 
@@ -1165,9 +846,9 @@ class RandomDragonflyTypeNode : SimulationNodeImpl
         this.param = param;
     }
 
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
+    public override void NodeHit(Simulator sim, object param, out BranchInfo[] branches)
     {
-        int tileType = this.param.Provide(param, rollParams);
+        int tileType = this.param.Provide(param);
 
         int[] types;
 
@@ -1212,111 +893,7 @@ enum EqualityType
     Ge
 }
 
-class FieldChanceNode : SimulationNodeImpl
-{
-    Func<SpawnerChances, float> getChance;
-    Action<SpawnSimulationContext> setFalse;
-    Action<SpawnSimulationContext> setTrue;
-
-    static Dictionary<string, FieldChanceNode> cache = new();
-
-    public static FieldChanceNode GetForField(string fieldName)
-    {
-        if (cache.TryGetValue(fieldName, out FieldChanceNode? node))
-            return node;
-
-        FieldInfo chanceField = Utils.GetFieldOrThrow<SpawnerChances>(fieldName + "Chance");
-        FieldInfo stateField = Utils.GetFieldOrThrow<SimulationTimelineState>(fieldName);
-
-        MethodInfo getCurrentTimelineState = Utils.GetMethodOrThrow<SpawnSimulationContext>("GetCurrentTimelineState");
-        ConstructorInfo nullBoolCtor = typeof(bool?).GetConstructor([typeof(bool)]) ?? throw new MissingMethodException("bool? ctor");
-
-        DynamicMethodDefinition dmd = new($"GetSpawnerChanceField_{fieldName}", typeof(float), [typeof(SpawnerChances)]);
-
-        ILProcessor il = dmd.GetILProcessor();
-
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, chanceField);
-        il.Emit(OpCodes.Ret);
-
-        Func<SpawnerChances, float> getChance = dmd.Generate().CreateDelegate<Func<SpawnerChances, float>>();
-
-        dmd = new($"SetSimulationTimelineStateFieldFalse_{fieldName}", typeof(void), [typeof(SpawnSimulationContext)]);
-        il = dmd.GetILProcessor();
-
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Call, getCurrentTimelineState);
-        il.Emit(OpCodes.Ldc_I4_0);
-        il.Emit(OpCodes.Newobj, nullBoolCtor);
-        il.Emit(OpCodes.Stfld, stateField);
-        il.Emit(OpCodes.Ret);
-
-        Action<SpawnSimulationContext> setFalse = dmd.Generate().CreateDelegate<Action<SpawnSimulationContext>>();
-
-        dmd = new($"SetSimulationTimelineStateFieldTrue_{fieldName}", typeof(void), [typeof(SpawnSimulationContext)]);
-        il = dmd.GetILProcessor();
-
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Call, getCurrentTimelineState);
-        il.Emit(OpCodes.Ldc_I4_1);
-        il.Emit(OpCodes.Newobj, nullBoolCtor);
-        il.Emit(OpCodes.Stfld, stateField);
-        il.Emit(OpCodes.Ret);
-
-        Action<SpawnSimulationContext> setTrue = dmd.Generate().CreateDelegate<Action<SpawnSimulationContext>>();
-
-        node = new(getChance, setFalse, setTrue);
-
-        cache.Add(fieldName, node);
-
-        return node;
-    }
-
-    private FieldChanceNode(Func<SpawnerChances, float> getChance, Action<SpawnSimulationContext> setFalse, Action<SpawnSimulationContext> setTrue)
-    {
-        this.getChance = getChance;
-        this.setFalse = setFalse;
-        this.setTrue = setTrue;
-    }
-
-    public override void NodeHit(SpawnSimulationContext context, object param, NodeRollInfo rollParams, out BranchInfo[] branches)
-    {
-        float chance = getChance(context.chances);
-
-        if (chance >= 1f)
-        {
-            branches = [
-                new() {
-                    chance = 1f,
-                    returnValue = 1,
-                    onBranchSelected = setTrue,
-                }
-            ];
-        }
-        else if (chance <= 0f)
-        {
-            branches = [
-                new() {
-                    chance = 1f,
-                    returnValue = 0,
-                    onBranchSelected = setFalse,
-                }
-            ];
-        }
-        else
-        {
-            branches = [
-                new() {
-                    chance = chance,
-                    returnValue = 1,
-                    onBranchSelected = setTrue,
-                },
-                new() {
-                    chance = 1f - chance,
-                    returnValue = 0,
-                    onBranchSelected = setFalse,
-                }
-            ];
-        }
-    }
+public class SimulationLuckMethods {
+    public required Func<Simulator, float> GetLuck;
+    public required Action<Simulator> OnLuckBasedBranchHit;
 }
