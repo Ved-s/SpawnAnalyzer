@@ -123,10 +123,10 @@ public class SpawnAnNPCRewriter
         {
             GetLuck = sim => ((SpawnAnNpcStaticData)sim.staticSimData).spawner.luck,
             OnLuckBasedBranchHit = sim => ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).BranchDependsOnLuck = true,
-
         };
 
         RandomCallNodeCodegen.RewriteRandomCalls(codegen, allowUnknownPatterns, luck);
+        RewriteChanceFields(codegen);
 
         ILCursor c = new(codegen.IL);
 
@@ -320,9 +320,9 @@ public class SpawnAnNPCRewriter
                 MethodBase resolved = method.ResolveReflection();
 
                 bool okMethod = false;
-                foreach (var p in method.Parameters)
+                foreach (var p in resolved.GetParameters())
                 {
-                    if (p.ParameterType.Is(typeof(Simulator)))
+                    if (p.ParameterType == typeof(Simulator))
                     {
                         okMethod = true;
                         continue;
@@ -369,7 +369,7 @@ public class SpawnAnNPCRewriter
                 }
                 catch (Exception ex)
                 {
-                    throw new AggregateException($"Exception while loading method {method.FullName} for side-effect analysis", ex);
+                    throw new AggregateException($"Exception while loading method {resolved.Name} for side-effect analysis", ex);
                 }
                 ILContext ilc = new(dmd.Definition);
 
@@ -1481,6 +1481,10 @@ public class SpawnAnNPCRewriter
             }
             return false;
         }
+        else if (instr.MatchCall<SpawnAnNPCRewriter>(nameof(DontPatchSlimesMarker)))
+        {
+            return false;
+        }
 
         // Terraria.Utils.SelectRandom also gets used in 9 places, can be checked too
 
@@ -1560,6 +1564,10 @@ public class SpawnAnNPCRewriter
 
             codegen.TempLocals.FreeVariable(tempNullBoolVar);
         }
+    }
+
+    public static T DontPatchSlimesMarker<T>(T val) {
+        return val;
     }
 }
 

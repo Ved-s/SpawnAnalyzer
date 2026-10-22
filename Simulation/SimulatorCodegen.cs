@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -44,7 +45,7 @@ public class SimulatorCodegen
     public bool DebugPrintout = false;
 
     private List<ILLabel> entryJumps = new();
-    private ulong stackStatesGenerated = 0;
+    private static ulong stackStatesGenerated = 0;
     private int LocalsToSave;
 
     public SimulatorCodegen(DynamicMethodDefinition dmd, IParameterHandler parameterHandler)
@@ -67,7 +68,8 @@ public class SimulatorCodegen
         this.parameterHandler = parameterHandler;
     }
 
-    public void AnalyzeStack() {
+    public void AnalyzeStack()
+    {
         Stack = StackAnalyzer.Analyze(IL);
     }
 
@@ -159,7 +161,9 @@ public class SimulatorCodegen
 
         float sizeKb = (float)size / 1024;
 
-        Console.WriteLine($"{Method.Name} simulator codegen finished, code size: {sizeKb:0.00}kb, instructions: {IL.Instrs.Count}, locals: {LocalStateType!.Type.GetFields().Length}, nodes: {Nodes.Count}");
+        string name = Method.Name ?? Method.OriginalMethod?.Name ?? "<no name>";
+
+        Console.WriteLine($"{name} simulator codegen finished, code size: {sizeKb:0.00}kb, instructions: {IL.Instrs.Count}, locals: {LocalStateType!.Type.GetFields().Length}, nodes: {Nodes.Count}");
 
         DMDHack.SetNullOriginalMethod(Method);
 
@@ -180,10 +184,10 @@ public class SimulatorCodegen
         // TODO: cache
         DynamicStateType? stackStateType = null;
 
+        (Type, bool)[] stackSaveTypes = new (Type, bool)[stackValuesToSave.Length];
+
         if (stackValuesToSave.Length > 0)
         {
-            Type[] stackValueTypes = new Type[stackValuesToSave.Length];
-
             for (int i = 0; i < stackValuesToSave.Length; i++)
             {
                 StackValue sv = stackValuesToSave[i];
@@ -196,13 +200,19 @@ public class SimulatorCodegen
                     throw new InvalidOperationException("Can't preserve stack value of reference type");
                 }
 
-                stackValueTypes[i] = sv.type;
+                bool save = true;
+                if (sv.type == typeof(Simulator))
+                {
+                    save = false;
+                }
+
+                stackSaveTypes[i] = (sv.type, save);
             }
 
-            stackStateType = DynamicStateType.Generate($"RandomCallStackState_{stackStatesGenerated}", stackValueTypes);
+            stackStateType = DynamicStateType.Generate($"RandomCallStackState_{stackStatesGenerated}", stackSaveTypes.Where(v => v.Item2).Select(v => v.Item1));
             stackStatesGenerated++;
 
-            MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackValuesToSave, stackStateType.Type);
+            MethodInfo stackSaveMethod = GenerateStackSaveMethod(stackSaveTypes, stackStateType.Type);
             c.Emit(OpCodes.Ldarg, SimulatorParam);
             c.Emit(OpCodes.Call, stackSaveMethod);
 
@@ -255,31 +265,31 @@ public class SimulatorCodegen
             c.Emit<Simulator>(OpCodes.Call, "GetLastNodeStackStateClone");
             c.Emit(OpCodes.Stloc, stackStateVar);
 
-            for (int i = 0; i < stackValuesToSave.Length; i++)
+            int field = 0;
+            for (int i = 0; i < stackSaveTypes.Length; i++)
             {
-                c.Emit(OpCodes.Ldloc, stackStateVar);
-                c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, DynamicStateType.GetAutoFieldName(i)));
+                var (type, save) = stackSaveTypes[i];
+                if (save) {
+                    c.Emit(OpCodes.Ldloc, stackStateVar);
+                    c.Emit(OpCodes.Ldfld, Utils.GetFieldOrThrow(stackStateType!.Type, DynamicStateType.GetAutoFieldName(field)));
+                    field++;
+                }
+                else if (type == typeof(Simulator)) {
+                    c.Emit(OpCodes.Ldarg, SimulatorParam);
+                }
             }
 
             c.Emit(OpCodes.Ldloc, returnValueVar);
             TempLocals.FreeVariable(returnValueVar);
         }
 
-
         SimulationNodeInfo info = new(stackStateType, node);
         Nodes.Add(info);
     }
 
-    private static MethodInfo GenerateStackSaveMethod(ReadOnlySpan<StackValue> types, Type stackStateType)
+    private static MethodInfo GenerateStackSaveMethod(IEnumerable<(Type, bool)> values, Type stackStateType)
     {
-        Type[] parameters = new Type[types.Length + 1];
-
-        for (int i = 0; i < types.Length; i++)
-        {
-            parameters[i] = types[i].type!;
-        }
-
-        parameters[parameters.Length - 1] = typeof(Simulator);
+        Type[] parameters = values.Select(v => v.Item1).Append(typeof(Simulator)).ToArray();
 
         DynamicMethod dmd = new($"StackSave_{stackStateType.Name}", typeof(void), parameters);
 
@@ -296,14 +306,19 @@ public class SimulatorCodegen
         il.Emit(ROpCodes.Call, createInstance);
         il.Emit(ROpCodes.Stloc, stateVar);
 
-        int fieldIndex = 0;
-        for (int i = 0; i < types.Length; i++)
+        int field = 0;
+        int arg = 0;
+        foreach (var (_, save) in values)
         {
-            il.Emit(ROpCodes.Ldloc, stateVar);
-            il.Emit(ROpCodes.Ldarg, i);
-            il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, DynamicStateType.GetAutoFieldName(fieldIndex)));
+            if (save)
+            {
+                il.Emit(ROpCodes.Ldloc, stateVar);
+                il.Emit(ROpCodes.Ldarg, arg);
+                il.Emit(ROpCodes.Stfld, Utils.GetFieldOrThrow(stackStateType, DynamicStateType.GetAutoFieldName(field)));
 
-            fieldIndex++;
+                field++;
+            }
+            arg++;
         }
 
         il.Emit(ROpCodes.Ldarg, parameters.Length - 1);

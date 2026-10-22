@@ -18,6 +18,7 @@ using SpawnAnalyzer.Simulation;
 using SpawnAnalyzer.UI;
 using Terraria;
 using Terraria.DataStructures;
+using Terraria.Graphics;
 using Terraria.ID;
 using Terraria.UI;
 using Terraria.Utilities;
@@ -86,7 +87,7 @@ public class SpawnAnalyzer
 
         HackMonoModDynamicMethodNRE();
 
-        SelfTest(7, false, true, false);
+        SelfTest(null, false, false, false);
         Environment.Exit(1);
 
         ImplInitThread = new Thread(() =>
