@@ -11,6 +11,7 @@ using MonoMod.Utils;
 using SpawnAnalyzer.Simulation;
 using SpawnAnalyzer.UI.Tabs;
 using Terraria;
+using Terraria.GameContent.LootSimulation.LootSimulatorConditionSetterTypes;
 using Terraria.ID;
 using Terraria.Utilities;
 
@@ -122,7 +123,7 @@ public class SpawnAnNPCRewriter
         SimulationLuckMethods luck = new()
         {
             GetLuck = sim => ((SpawnAnNpcStaticData)sim.staticSimData).spawner.luck,
-            OnLuckBasedBranchHit = sim => ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).BranchDependsOnLuck = true,
+            OnLuckBasedBranchHit = (sim, direct) => ((SpawnAnNpcBlockResult)sim.GetCurrentBlockRunResult()).AddLuck(direct),
         };
 
         RandomCallNodeCodegen.RewriteRandomCalls(codegen, allowUnknownPatterns, luck);
@@ -1647,8 +1648,8 @@ public class SpawnAnNpcStaticData
     public required NPC.Spawner spawner;
     public required int spawnTileX;
     public required int spawnTileY;
-    public required int spawnTileType;
-    public required int spawnWallType;
+    public required int tileType;
+    public required int wallType;
     public required bool xRange;
     public required int target;
 
@@ -1666,10 +1667,49 @@ public class SpawnAnNpcStaticData
     }
 }
 
+public enum BranchLuckType {
+    None,
+    Direct,
+    Indirect,
+    Mixed
+}
+
 public class SpawnAnNpcBlockResult
 {
-    public bool BranchDependsOnLuck = false;
+    public BranchLuckType BranchLuckType = BranchLuckType.None;
     public List<NextSpawn>? Spawns = null;
+
+    public bool? GetLuckAffection() {
+        return BranchLuckType switch
+        {
+            BranchLuckType.None => null,
+            BranchLuckType.Direct => true,
+            BranchLuckType.Indirect => false,
+            BranchLuckType.Mixed => false,
+            _ => throw new InvalidOperationException(),
+        };
+    }
+
+    internal void AddLuck(bool direct) {
+        switch (BranchLuckType) {
+            case BranchLuckType.None:
+                if (direct)
+                    BranchLuckType = BranchLuckType.Direct;
+                else 
+                    BranchLuckType = BranchLuckType.Indirect;
+                break;
+            
+            case BranchLuckType.Direct:
+                if (!direct)
+                    BranchLuckType = BranchLuckType.Mixed;
+                break;
+
+            case BranchLuckType.Indirect:
+                if (direct)
+                    BranchLuckType = BranchLuckType.Mixed;
+                break;
+        }
+    }
 
     internal void ExitNodeHit_SpawnNPC(int x, int y, int type)
     {

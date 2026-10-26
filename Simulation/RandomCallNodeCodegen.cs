@@ -623,12 +623,17 @@ class OneParamRandomNextNode : SimulationNodeImpl
 
                 float? tryhitChance = LuckChanceMod(hitChance, luckDependance, luck.GetLuck(sim), out dependsOnLuck);
 
-                Action<Simulator>? onHitLuckyBranch = null;
+                Action<Simulator>? onHitLuckyDirectBranch = null;
+                Action<Simulator>? onHitLuckyIndirectBranch = null;
                 if (dependsOnLuck)
                 {
-                    onHitLuckyBranch = sim =>
+                    onHitLuckyDirectBranch = sim =>
                     {
-                        luck.OnLuckBasedBranchHit(sim);
+                        luck.OnLuckBasedBranchHit(sim, true);
+                    };
+                    onHitLuckyIndirectBranch = sim =>
+                    {
+                        luck.OnLuckBasedBranchHit(sim, false);
                     };
                 }
 
@@ -647,11 +652,12 @@ class OneParamRandomNextNode : SimulationNodeImpl
                         new BranchInfo() {
                             chance = tryhitChance.Value,
                             returnValue = 0,
-                            onBranchSelected = onHitLuckyBranch,
+                            onBranchSelected = onHitLuckyDirectBranch,
                         },
                         new BranchInfo() {
                             chance = 1f - tryhitChance.Value,
                             returnValue = 1,
+                            onBranchSelected = onHitLuckyIndirectBranch,
                         },
                     ];
                 }
@@ -662,12 +668,18 @@ class OneParamRandomNextNode : SimulationNodeImpl
                 hitChance = (float)(handler.value + 1) / value;
 
                 tryhitChance = LuckChanceMod(hitChance, luckDependance, luck.GetLuck(sim), out dependsOnLuck);
-                onHitLuckyBranch = null;
+                
+                onHitLuckyDirectBranch = null;
+                onHitLuckyIndirectBranch = null;
                 if (dependsOnLuck)
                 {
-                    onHitLuckyBranch = sim =>
+                    onHitLuckyDirectBranch = sim =>
                     {
-                        luck.OnLuckBasedBranchHit(sim);
+                        luck.OnLuckBasedBranchHit(sim, true);
+                    };
+                    onHitLuckyIndirectBranch = sim =>
+                    {
+                        luck.OnLuckBasedBranchHit(sim, false);
                     };
                 }
 
@@ -686,11 +698,12 @@ class OneParamRandomNextNode : SimulationNodeImpl
                         new BranchInfo() {
                             chance = tryhitChance.Value,
                             returnValue = handler.value,
-                            onBranchSelected = onHitLuckyBranch,
+                            onBranchSelected = onHitLuckyDirectBranch,
                         },
                         new BranchInfo() {
                             chance = 1f - tryhitChance.Value,
                             returnValue = handler.value+1,
+                            onBranchSelected = onHitLuckyIndirectBranch,
                         },
                     ];
                 }
@@ -895,5 +908,7 @@ enum EqualityType
 
 public class SimulationLuckMethods {
     public required Func<Simulator, float> GetLuck;
-    public required Action<Simulator> OnLuckBasedBranchHit;
+
+    // (Simulator sim, bool directLuckBranch)
+    public required Action<Simulator, bool> OnLuckBasedBranchHit;
 }

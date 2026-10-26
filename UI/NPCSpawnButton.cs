@@ -79,7 +79,7 @@ public class NPCSpawnButton : UIElement, ISelectable
 
         Rectangle dims = GetDimensions().ToRectangle();
 
-        float chance = 0;
+        double chance = 0;
         bool affectedByLuck = false;
         bool spawnOnPlayer = false;
         bool leaked = false;
@@ -92,7 +92,7 @@ public class NPCSpawnButton : UIElement, ISelectable
                 leaked = spawn.leaked;
             }
 
-            if (spawn.affectedByLuck)
+            if (spawn.IsAffectedByLuckDirectly)
                 affectedByLuck = true;
 
             if (spawn.spawnOnPlayer)
@@ -244,7 +244,7 @@ public class NPCSpawnButton : UIElement, ISelectable
         return $"{(int)years}y";
     }
 
-    public static string FormatPercentage(float chance)
+    public static string FormatPercentage(double chance)
     {
         chance *= 100;
 

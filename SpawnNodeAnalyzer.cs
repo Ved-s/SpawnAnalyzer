@@ -1,15 +1,76 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
+using SpawnAnalyzer.Rewriters;
+using SpawnAnalyzer.Rewriters.SpawnAnNPC;
 using SpawnAnalyzer.Simulation;
-using Terraria;
-using Terraria.GameContent.Bestiary;
-using Terraria.ID;
 
 namespace SpawnAnalyzer;
 
+public static class SpawnNodeAnalyzer
+{
+    public static AnalyzedSpawns Analyze(SimulationResult simres)
+    {
+        AnalyzedSpawns?[] blockSpawns = new AnalyzedSpawns?[simres.blocks.Length];
+        
+        Stack<int> blocksToAnalyze = new();
+        bool[] blocksOnStack = new bool[simres.blocks.Length];
 
+        blocksToAnalyze.Push(0);
+        blocksOnStack[0] = true;
+
+        while (blocksToAnalyze.Count > 0) {
+            int blockid = blocksToAnalyze.Peek();
+            if (blockSpawns[blockid] is not null) {
+                blocksToAnalyze.Pop();
+                blocksOnStack[blockid] = false;
+                continue;
+            }
+
+            SimulationBlock block = simres.blocks[blockid];
+            bool skip = false;
+            foreach (var branch in block.nextBranches) {
+                int nextBlock = branch.nextBlock;
+                if (blockSpawns[nextBlock] is null && !blocksOnStack[nextBlock]) {
+                    blocksToAnalyze.Push(nextBlock);
+                    blocksOnStack[nextBlock] = true;
+                    skip = true;
+                    break;
+                }
+            }
+            if (skip)
+                continue;
+
+            double actualMaxChance = 0.0;
+
+            foreach (var branch in block.nextBranches) {
+                if (!blocksOnStack[branch.nextBlock])
+                    actualMaxChance += branch.chance;
+            }
+
+            AnalyzedSpawns s = new();
+            foreach (var branch in block.nextBranches) {
+                int nextBlock = branch.nextBlock;
+                if (blocksOnStack[nextBlock])
+                    continue;
+                AnalyzedSpawns branchSpawns = blockSpawns[nextBlock]!;
+                s.MergeFrom(branchSpawns, new() { 
+                    chanceMultiplier = branch.chance / actualMaxChance,
+                    setAffectedByLuck = (simres.blocks[nextBlock].results as SpawnAnNpcBlockResult)?.GetLuckAffection(),
+                });
+            }
+
+            if (block.results is SpawnAnNpcBlockResult res)
+                s.AddSpawns(res);
+
+            blockSpawns[blockid] = s;
+            blocksToAnalyze.Pop();
+            blocksOnStack[blockid] = false;
+        }
+
+        return blockSpawns[0]!;
+    }
+}
 /*
 class AnalyzerStackFrame
 {
@@ -113,12 +174,28 @@ public static class SpawnNodeAnalyzer
         return retvalue ?? new();
     }
 }
+*/
+
+public struct MergeParams {
+    public double chanceMultiplier = 1.0;
+    public bool? setAffectedByLuck = null;
+
+    public MergeParams() {}
+}
 
 public class AnalyzedSpawns
 {
     public Dictionary<int, AnalyzedNPCSpawns> npcSpawns = new();
 
-    public void AddSpawn(NextSpawn spawn, NodeRollInfo rollInfo)
+    public void AddSpawns(SpawnAnNpcBlockResult block) {
+        if (block.Spawns is null)
+            return;
+
+        foreach (var spawn in block.Spawns)
+            AddSpawn(spawn);
+    }
+
+    public void AddSpawn(NextSpawn spawn)
     {
         if (!npcSpawns.TryGetValue(spawn.npcId, out var npcSpawn))
         {
@@ -131,7 +208,7 @@ public class AnalyzedSpawns
             chance = 1,
 
             leaked = spawn.leakedSpawn,
-            affectedByLuck = rollInfo.dependsOnLuck,
+            affectedByLuck = false,
             spawnOnPlayer = spawn.spawnOnPlayer
         };
 
@@ -139,12 +216,6 @@ public class AnalyzedSpawns
 
         npcSpawn.spawns.Add(posspawn);
         posspawn.AddSpawn(spawn.pos, analyzed);
-    }
-
-    public void MultiplyChance(float mul)
-    {
-        foreach (var npcSpawn in npcSpawns.Values)
-            npcSpawn.MultiplyChance(mul);
     }
 
     public void AppendFrom(AnalyzedSpawns aspawns)
@@ -161,17 +232,17 @@ public class AnalyzedSpawns
         }
     }
 
-    public void MergeFrom(AnalyzedSpawns aspawns)
+    public void MergeFrom(AnalyzedSpawns aspawns, MergeParams p)
     {
         foreach (var (id, spawns) in aspawns.npcSpawns)
         {
             if (!npcSpawns.TryGetValue(id, out var thisSpawns))
             {
-                npcSpawns.Add(id, spawns);
+                npcSpawns.Add(id, spawns.WithParams(p));
                 continue;
             }
 
-            thisSpawns.MergeFrom(spawns);
+            thisSpawns.MergeFrom(spawns, p);
         }
     }
 }
@@ -186,10 +257,11 @@ public class AnalyzedNPCSpawns
         this.id = id;
     }
 
-    public void MultiplyChance(float mul)
-    {
-        foreach (var spawn in spawns)
-            spawn.MultiplyChance(mul);
+    public AnalyzedNPCSpawns WithParams(MergeParams p) {
+        AnalyzedNPCSpawns n = new(id);
+
+        n.spawns.AddRange(spawns.Select(s => s.WithParams(p)));
+        return n;
     }
 
     public void AppendFrom(AnalyzedNPCSpawns spawns)
@@ -197,7 +269,7 @@ public class AnalyzedNPCSpawns
         this.spawns.AddRange(spawns.spawns);
     }
 
-    public void MergeFrom(AnalyzedNPCSpawns spawns)
+    public void MergeFrom(AnalyzedNPCSpawns spawns, MergeParams p)
     {
         HashSet<int> usedSpawnIndexes = new();
 
@@ -240,7 +312,7 @@ public class AnalyzedNPCSpawns
 
             thisSpawn = this.spawns[mostMatchedPos];
 
-            thisSpawn.MergeFrom(newSpawn);
+            thisSpawn.MergeFrom(newSpawn, p);
         }
 
         foreach (var newSpawn in unmatchedSpawns)
@@ -251,7 +323,7 @@ public class AnalyzedNPCSpawns
                 if (usedSpawnIndexes.Contains(i))
                     continue;
 
-                this.spawns[i].MergeFrom(newSpawn);
+                this.spawns[i].MergeFrom(newSpawn, p);
                 usedSpawnIndexes.Add(i);
                 merged = true;
                 break;
@@ -261,7 +333,7 @@ public class AnalyzedNPCSpawns
                 continue;
 
             usedSpawnIndexes.Add(this.spawns.Count);
-            this.spawns.Add(newSpawn);
+            this.spawns.Add(newSpawn.WithParams(p));
         }
     }
 
@@ -283,6 +355,17 @@ public class AnalyzedMultiPosSpawn
     public AnalyzedMultiPosSpawn(int id)
     {
         this.id = id;
+    }
+
+    public AnalyzedMultiPosSpawn WithParams(MergeParams p) {
+        AnalyzedMultiPosSpawn n = new(id);
+
+        foreach (var (pos, spawn) in posSpawns) {
+            n.posSpawns[pos] = spawn.WithParams(p);
+        }
+        n.noPosSpawn = noPosSpawn?.WithParams(p);
+
+        return n;
     }
 
     public bool HasPosition(Point? pos)
@@ -351,53 +434,44 @@ public class AnalyzedMultiPosSpawn
         if (pos is null)
         {
             if (noPosSpawn is not null)
-                noPosSpawn.MergeFrom(spawn);
+                noPosSpawn.MergeFrom(spawn, new());
             else
-                noPosSpawn = spawn;
+                noPosSpawn = spawn.Clone();
         }
         else
         {
             if (posSpawns.TryGetValue(pos.Value, out var posSpawn))
             {
-                posSpawn.MergeFrom(spawn);
+                posSpawn.MergeFrom(spawn, new());
             }
             else
             {
-                posSpawns.Add(pos.Value, spawn);
+                posSpawns.Add(pos.Value, spawn.Clone());
             }
         }
     }
 
-    public void MergeFrom(AnalyzedMultiPosSpawn spawns)
+    public void MergeFrom(AnalyzedMultiPosSpawn spawns, MergeParams p)
     {
         foreach (var (pos, spawn) in spawns.posSpawns)
         {
             if (posSpawns.TryGetValue(pos, out var posSpawn))
             {
-                posSpawn.MergeFrom(spawn);
+                posSpawn.MergeFrom(spawn, p);
             }
             else
             {
-                posSpawns.Add(pos, spawn);
+                posSpawns.Add(pos, spawn.WithParams(p));
             }
         }
 
         if (spawns.noPosSpawn is not null)
         {
             if (noPosSpawn is not null)
-                noPosSpawn.MergeFrom(spawns.noPosSpawn);
+                noPosSpawn.MergeFrom(spawns.noPosSpawn, p);
             else
-                noPosSpawn = spawns.noPosSpawn;
+                noPosSpawn = spawns.noPosSpawn.WithParams(p);
         }
-    }
-
-    public void MultiplyChance(float mul)
-    {
-        foreach (var spawn in posSpawns.Values)
-            spawn.chance *= mul;
-
-        if (noPosSpawn is not null)
-            noPosSpawn.chance *= mul;
     }
 
     public void ConvertToTilePos()
@@ -409,7 +483,7 @@ public class AnalyzedMultiPosSpawn
             Point tilePos = new(pos.X / 16, pos.Y / 16);
 
             if (posSpawns.TryGetValue(tilePos, out var spawn)) {
-                spawn.MergeFrom(oldSpawn);
+                spawn.MergeFrom(oldSpawn, new());
             }
             else {
                 posSpawns.Add(tilePos, oldSpawn);
@@ -421,33 +495,63 @@ public class AnalyzedMultiPosSpawn
         AnalyzedSpawn spawn = new();
 
         foreach (var s in IterSpawns()) {
-            spawn.MergeFrom(s);
+            spawn.MergeFrom(s, new());
         }
 
         return spawn;
     }
 }
-*/
 
 public class AnalyzedSpawn
 {
-    public float chance;
+    public double chance;
 
     public bool leaked;
 
-    public bool affectedByLuck;
+    public bool? affectedByLuck;
+    public bool affectedByMixedLuck;
 
     public bool spawnOnPlayer;
+
+    public bool IsAffectedByLuckDirectly => !affectedByMixedLuck && affectedByLuck is true;
 
     /// <summary>
     /// doesn't modify `spawn`
     /// </summary>
-    public void MergeFrom(AnalyzedSpawn spawn)
+    public void MergeFrom(AnalyzedSpawn spawn, MergeParams p)
     {
-        chance += spawn.chance;
+        chance += spawn.chance * p.chanceMultiplier;
         leaked |= spawn.leaked;
-        affectedByLuck |= spawn.affectedByLuck;
         spawnOnPlayer |= spawn.spawnOnPlayer;
+        affectedByMixedLuck |= spawn.affectedByMixedLuck;
+
+        if (!affectedByMixedLuck) {
+            AddLuck(spawn.affectedByLuck);
+            AddLuck(p.setAffectedByLuck);
+        }
+    }
+
+    void AddLuck(bool? direct) {
+        if (direct is null)
+            return;
+
+        if (affectedByLuck is null) {
+            affectedByLuck = direct;
+            return;
+        }
+
+        if (affectedByLuck != direct) {
+            affectedByMixedLuck = true;
+            affectedByLuck = null;
+        }
+    }
+
+    public AnalyzedSpawn WithParams(MergeParams p) {
+        AnalyzedSpawn s = Clone();
+        s.chance *= p.chanceMultiplier;
+        if (p.setAffectedByLuck.HasValue && !affectedByMixedLuck)
+            AddLuck(p.setAffectedByLuck);
+        return s;
     }
 
     public AnalyzedSpawn Clone()

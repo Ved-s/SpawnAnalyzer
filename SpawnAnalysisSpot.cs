@@ -100,8 +100,8 @@ public class SpawnAnalysisSpot
             spawner = spawner,
             spawnTileX = spawnPosition.X,
             spawnTileY = spawnPosition.Y,
-            spawnTileType = spawnTileType,
-            spawnWallType = spawnWallType,
+            tileType = spawnTileType,
+            wallType = spawnWallType,
             xRange = p.xRange,
             target = Main.myPlayer,
             chances = localChances
@@ -125,9 +125,6 @@ public class SpawnAnalysisSpot
 
     internal void Simulate(out TimeSpan analysisTime, SpawnAnalysisResults outResults)
     {
-
-        throw new NotImplementedException();
-        /*
         SimulationResult? results = simulationContext.Simulate();
         NonDeterministic = simulationContext.NonDeterministic;
         analysis.NonDeterministic |= NonDeterministic;
@@ -173,21 +170,19 @@ public class SpawnAnalysisSpot
                         finalPosSpawns.Add(pos, list);
                     }
 
-                    list.Add(posSpawn);
+                    list.Add(posSpawn.Clone());
                 }
 
                 var allSpawn = spawn.AllPositionsSpawn();
-                startSpawns.Add(allSpawn.Clone());
-
-                allSpawn.chance *= chanceMultiplier;
-                localTotalSpawns.Add(allSpawn);
+                localTotalSpawns.Add(allSpawn.WithParams(new() { chanceMultiplier = chanceMultiplier }));
+                startSpawns.Add(allSpawn);
             }
 
             for (int i = 0; i < localTotalSpawns.Count; i++)
             {
                 if (totalSpawns.Count > i)
                 {
-                    totalSpawns[i].MergeFrom(localTotalSpawns[i]);
+                    totalSpawns[i].MergeFrom(localTotalSpawns[i], new());
                 }
                 else
                 {
@@ -195,7 +190,7 @@ public class SpawnAnalysisSpot
                 }
             }
 
-            npcSpawns.MultiplyChance(chanceMultiplier);
+            MergeParams chanceMergeParams = new() { chanceMultiplier = chanceMultiplier };
 
             foreach (var (pos, posSpawns) in finalPosSpawns)
             {
@@ -211,23 +206,22 @@ public class SpawnAnalysisSpot
                     {
                         if (finalSpawnsId.Count > i)
                         {
-                            finalSpawnsId[i].MergeFrom(posSpawns[i]);
+                            finalSpawnsId[i].MergeFrom(posSpawns[i], chanceMergeParams);
                         }
                         else
                         {
-                            finalSpawnsId.Add(posSpawns[i].Clone());
+                            finalSpawnsId.Add(posSpawns[i].WithParams(chanceMergeParams));
                         }
                     }
                 }
                 else
                 {
-                    dict.Add(npcid, posSpawns.Select(s => s.Clone()).ToList());
+                    dict.Add(npcid, posSpawns.Select(s => s.WithParams(chanceMergeParams)).ToList());
                 }
             }
         }
         sw.Stop();
         analysisTime = sw.Elapsed;
-        */
     }
 
     internal void MouseOver(StringBuilder mouseOverText)

@@ -545,7 +545,7 @@ public class SpawnsTab : Tab
 
             y += 6;
 
-            if (spawn.affectedByLuck)
+            if (spawn.IsAffectedByLuckDirectly)
             {
                 UIPanel luckTraitPanel = new()
                 {

@@ -87,7 +87,7 @@ public class SpawnAnalyzer
 
         HackMonoModDynamicMethodNRE();
 
-        SelfTest(null, false, false, false);
+        SelfTest(null, false, false, true);
         Environment.Exit(1);
 
         ImplInitThread = new Thread(() =>
@@ -339,8 +339,8 @@ public class SpawnAnalyzer
                 spawner = spawner,
                 spawnTileX = 100,
                 spawnTileY = 100,
-                spawnTileType = TileID.Grass,
-                spawnWallType = WallID.None,
+                tileType = TileID.Grass,
+                wallType = WallID.None,
                 xRange = false,
                 target = 0,
                 chances = SpawnerChances.WithValuesFrom(spawner)
@@ -394,11 +394,18 @@ public class SpawnAnalyzer
                 }
             }
 
-            /*
-            if (printChances)
-            {
-                AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
+            AnalyzedSpawns spawnChances = SpawnNodeAnalyzer.Analyze(simulationResult);
 
+            bool invalidChances = false;
+            if (!TestMethods.VerifyAnalyzedSpawns(i, spawnChances))
+            {
+                Console.WriteLine($"Self-test {i}: got invalid spawn chances");
+                invalidChances = true;
+                ok = false;
+            }
+
+            if (printChances || invalidChances)
+            {
                 Console.WriteLine("Calculated chances:");
                 foreach (var mspawn in spawnChances.npcSpawns.Values)
                 {
@@ -427,7 +434,7 @@ public class SpawnAnalyzer
                             else
                                 Console.Write($"at {pos.Value}");
 
-                            if (spawn.affectedByLuck)
+                            if (spawn.IsAffectedByLuckDirectly)
                                 Console.Write(" (luck)");
                             if (spawn.leaked)
                                 Console.Write(" (leak)");
@@ -437,22 +444,21 @@ public class SpawnAnalyzer
                     Console.WriteLine();
                 }
             }
-            */
 
             TestMethods.TestBlock[]? testData = TestMethods.GetExpectedTestResults(i);
 
             if (testData is null)
             {
-                Console.WriteLine($"Self-test {i} ran, no test data to verify results");
-                continue;
+                Console.WriteLine($"No expected block data to verify test {i} against");
             }
-
-
-            int faildepth = 0;
-            if (!MatchBlock(i, 0, 0, testData, simulationResult.blocks, true, 0, ref faildepth))
+            else
             {
-                ok = false;
-                continue;
+                int faildepth = 0;
+                if (!MatchBlock(i, 0, 0, testData, simulationResult.blocks, true, 0, ref faildepth))
+                {
+                    ok = false;
+                    continue;
+                }
             }
 
             Console.WriteLine($"Self-test {i} pass");
