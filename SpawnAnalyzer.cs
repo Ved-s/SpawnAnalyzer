@@ -87,9 +87,6 @@ public class SpawnAnalyzer
 
         HackMonoModDynamicMethodNRE();
 
-        SelfTest(null, false, false, true);
-        Environment.Exit(1);
-
         ImplInitThread = new Thread(() =>
         {
             Stopwatch sw = Stopwatch.StartNew();
